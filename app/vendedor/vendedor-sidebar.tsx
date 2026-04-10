@@ -62,7 +62,7 @@ export function VendedorSidebar({ username }: { username: string }) {
 
   return (
     <>
-      <header className="sticky top-0 z-40 flex h-14 items-center justify-between border-b border-white/10 bg-slate-950/95 px-4 backdrop-blur lg:hidden">
+      <header className="sticky top-0 z-40 flex h-14 items-center justify-between border-b border-white/15 bg-slate-900/75 px-4 backdrop-blur-xl lg:hidden">
         <span className="text-sm font-semibold text-amber-400">Vendedor</span>
         <button
           type="button"
@@ -82,7 +82,7 @@ export function VendedorSidebar({ username }: { username: string }) {
         onClick={() => setOpen(false)}
       />
       <aside
-        className={`fixed inset-y-0 left-0 z-50 flex w-[min(280px,88vw)] flex-col border-r border-white/10 bg-slate-950 transition-transform duration-200 ease-out lg:static lg:z-0 lg:w-60 lg:translate-x-0 lg:shrink-0 ${
+        className={`fixed inset-y-0 left-0 z-50 flex w-[min(280px,88vw)] flex-col border-r border-white/15 bg-slate-900/55 shadow-[0_0_40px_-10px_rgba(0,0,0,0.5)] backdrop-blur-2xl transition-transform duration-200 ease-out lg:static lg:z-10 lg:w-60 lg:translate-x-0 lg:shrink-0 ${
           open ? "translate-x-0 shadow-2xl" : "-translate-x-full lg:translate-x-0"
         }`}
       >

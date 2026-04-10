@@ -1,23 +1,44 @@
-import { AdminSection } from "@/app/admin/_components/admin-section";
+import { AdminPageShell } from "@/app/admin/_components/admin-page-shell";
+import { IngresoCompraForm } from "@/app/admin/importacion/ingreso-compra-form";
+import { listProveedoresActivos } from "@/lib/data/proveedores";
+import { listSucursales } from "@/lib/data/sucursales";
+import { getUltimoTipoCambio } from "@/lib/data/tipo-cambio";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Importación",
+  title: "Ingreso de compra",
 };
 
-export default function AdminImportacionPage() {
+export default async function AdminImportacionPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ error?: string }>;
+}) {
+  const sp = await searchParams;
+
+  const [sucursalesRaw, proveedores, tc] = await Promise.all([
+    listSucursales(),
+    listProveedoresActivos(),
+    getUltimoTipoCambio(),
+  ]);
+
+  const sucursales = sucursalesRaw
+    .filter((s) => s.estado === "activo")
+    .map((s) => ({ id: s.id, nombre: s.nombre }));
+
+  const proveedoresOpts = proveedores.map((p) => ({ id: p.id, nombre: p.nombre }));
+
   return (
-    <AdminSection
-      title="Importación de productos"
-      description="Subí archivos CSV o Excel y mapeá columnas al catálogo."
+    <AdminPageShell
+      title="Ingreso a tienda (compra)"
+      description="Registrá compra a proveedor: tipo de pago, flete (% o monto) y destino de stock por sucursal. Cada ítem es un producto del catálogo (buscá y seleccioná). Si no existe, usá «Nuevo producto». Al confirmar se crean compra confirmada, detalle, lotes, movimientos de inventario y se actualiza el catálogo (precios, QR, medida, descripción, imágenes opcionales)."
+      error={sp.error}
     >
-      <p>
-        Aquí irá el flujo de importación masiva validado contra{" "}
-        <code className="rounded bg-white/10 px-1.5 py-0.5 font-mono text-xs text-slate-200">
-          productos
-        </code>{" "}
-        y reglas de códigos únicos / QR.
-      </p>
-    </AdminSection>
+      <IngresoCompraForm
+        sucursales={sucursales}
+        proveedoresIniciales={proveedoresOpts}
+        tipoCambio={tc}
+      />
+    </AdminPageShell>
   );
 }

@@ -17,8 +17,8 @@ export const metadata: Metadata = {
 const modules = [
   {
     href: "/admin/importacion",
-    title: "Importación",
-    desc: "Carga masiva de productos y plantillas.",
+    title: "Ingreso / compra",
+    desc: "Compra a proveedor y stock por sucursal.",
     icon: Upload,
     accent: "from-rose-500/20 to-rose-600/5 ring-rose-500/20 text-rose-200",
   },
