@@ -1,6 +1,6 @@
 import { AdminPageShell } from "@/app/admin/_components/admin-page-shell";
 import { updateUsuarioAction } from "@/app/admin/usuarios/actions";
-import { listRoles } from "@/lib/data/roles";
+import { etiquetaRolEspanol, listRoles } from "@/lib/data/roles";
 import { listSucursales } from "@/lib/data/sucursales";
 import { getUsuario } from "@/lib/data/usuarios";
 import type { Metadata } from "next";
@@ -88,7 +88,7 @@ export default async function EditarUsuarioPage({ params, searchParams }: Props)
           >
             {roles.map((r) => (
               <option key={r.id} value={r.id}>
-                {r.nombre}
+                {etiquetaRolEspanol(r)}
               </option>
             ))}
           </select>

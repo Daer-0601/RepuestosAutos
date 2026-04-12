@@ -19,39 +19,50 @@ export async function ProductoEditor({
   const imagenes = mode === "edit" && id ? await listProductoImagenes(id) : [];
   const action = mode === "create" ? createProductoAction : updateProductoAction;
 
+  const unidadDefault =
+    product?.unidad === "JGO" || product?.unidad === "PZA" ? product.unidad : "PZA";
+
   return (
     <div className="max-w-2xl space-y-4 rounded-2xl border border-white/10 bg-slate-900/40 p-6">
-      <form action={action} className="space-y-4">
+      <form action={action} encType="multipart/form-data" className="space-y-4">
         {mode === "edit" && product ? <input type="hidden" name="id" value={product.id} /> : null}
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div>
-            <label htmlFor="codigo" className="text-xs font-medium uppercase tracking-wider text-slate-500">
-              Código *
-            </label>
-            <input
-              id="codigo"
-              name="codigo"
-              required
-              defaultValue={product?.codigo ?? ""}
-              className={field}
-            />
+        {mode === "create" ? (
+          <div className="rounded-lg border border-emerald-500/25 bg-emerald-950/20 px-3 py-2 text-sm text-emerald-100/90">
+            El <strong className="font-medium text-emerald-200">código</strong> y el{" "}
+            <strong className="font-medium text-emerald-200">QR</strong> se generan solos al crear (mismo
+            número, secuencia según el catálogo).
           </div>
-          <div>
-            <label
-              htmlFor="qr_payload"
-              className="text-xs font-medium uppercase tracking-wider text-slate-500"
-            >
-              QR payload
-            </label>
-            <input
-              id="qr_payload"
-              name="qr_payload"
-              defaultValue={product?.qr_payload ?? ""}
-              className={field}
-              placeholder="Si vacío, se usa el código"
-            />
+        ) : (
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label htmlFor="codigo" className="text-xs font-medium uppercase tracking-wider text-slate-500">
+                Código *
+              </label>
+              <input
+                id="codigo"
+                name="codigo"
+                required
+                defaultValue={product?.codigo ?? ""}
+                className={field}
+              />
+            </div>
+            <div>
+              <label
+                htmlFor="qr_payload"
+                className="text-xs font-medium uppercase tracking-wider text-slate-500"
+              >
+                QR payload
+              </label>
+              <input
+                id="qr_payload"
+                name="qr_payload"
+                defaultValue={product?.qr_payload ?? ""}
+                className={field}
+                placeholder="Si vacío, se usa el código"
+              />
+            </div>
           </div>
-        </div>
+        )}
         <div>
           <label htmlFor="nombre" className="text-xs font-medium uppercase tracking-wider text-slate-500">
             Nombre *
@@ -102,7 +113,10 @@ export async function ProductoEditor({
             <label htmlFor="unidad" className="text-xs font-medium uppercase tracking-wider text-slate-500">
               Unidad
             </label>
-            <input id="unidad" name="unidad" defaultValue={product?.unidad ?? ""} className={field} />
+            <select id="unidad" name="unidad" className={field} defaultValue={unidadDefault}>
+              <option value="PZA">PZA</option>
+              <option value="JGO">JGO</option>
+            </select>
           </div>
         </div>
         <div>
@@ -149,63 +163,70 @@ export async function ProductoEditor({
             className={field}
           />
         </div>
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div>
-            <label
-              htmlFor="precio_venta_lista_bs"
-              className="text-xs font-medium uppercase tracking-wider text-slate-500"
-            >
-              Precio lista Bs
-            </label>
-            <input
-              id="precio_venta_lista_bs"
-              name="precio_venta_lista_bs"
-              defaultValue={product?.precio_venta_lista_bs ?? ""}
-              className={field}
-            />
-          </div>
-          <div>
-            <label
-              htmlFor="precio_venta_lista_usd"
-              className="text-xs font-medium uppercase tracking-wider text-slate-500"
-            >
-              Precio lista USD
-            </label>
-            <input
-              id="precio_venta_lista_usd"
-              name="precio_venta_lista_usd"
-              defaultValue={product?.precio_venta_lista_usd ?? ""}
-              className={field}
-            />
-          </div>
-        </div>
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div>
-            <label
-              htmlFor="porcentaje_utilidad"
-              className="text-xs font-medium uppercase tracking-wider text-slate-500"
-            >
-              % utilidad
-            </label>
-            <input
-              id="porcentaje_utilidad"
-              name="porcentaje_utilidad"
-              defaultValue={product?.porcentaje_utilidad ?? ""}
-              className={field}
-            />
-          </div>
-          <div>
-            <label htmlFor="punto_tope" className="text-xs font-medium uppercase tracking-wider text-slate-500">
-              Punto tope
-            </label>
-            <input
-              id="punto_tope"
-              name="punto_tope"
-              defaultValue={product?.punto_tope ?? ""}
-              className={field}
-            />
-          </div>
-        </div>
+        {mode === "edit" ? (
+          <>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <label
+                  htmlFor="precio_venta_lista_bs"
+                  className="text-xs font-medium uppercase tracking-wider text-slate-500"
+                >
+                  Precio lista Bs
+                </label>
+                <input
+                  id="precio_venta_lista_bs"
+                  name="precio_venta_lista_bs"
+                  defaultValue={product?.precio_venta_lista_bs ?? ""}
+                  className={field}
+                />
+              </div>
+              <div>
+                <label
+                  htmlFor="precio_venta_lista_usd"
+                  className="text-xs font-medium uppercase tracking-wider text-slate-500"
+                >
+                  Precio lista USD
+                </label>
+                <input
+                  id="precio_venta_lista_usd"
+                  name="precio_venta_lista_usd"
+                  defaultValue={product?.precio_venta_lista_usd ?? ""}
+                  className={field}
+                />
+              </div>
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <label
+                  htmlFor="porcentaje_utilidad"
+                  className="text-xs font-medium uppercase tracking-wider text-slate-500"
+                >
+                  % utilidad
+                </label>
+                <input
+                  id="porcentaje_utilidad"
+                  name="porcentaje_utilidad"
+                  defaultValue={product?.porcentaje_utilidad ?? ""}
+                  className={field}
+                />
+              </div>
+              <div>
+                <label
+                  htmlFor="punto_tope"
+                  className="text-xs font-medium uppercase tracking-wider text-slate-500"
+                >
+                  Punto tope
+                </label>
+                <input
+                  id="punto_tope"
+                  name="punto_tope"
+                  defaultValue={product?.punto_tope ?? ""}
+                  className={field}
+                />
+              </div>
+            </div>
+          </>
+        ) : null}
         <div>
           <label htmlFor="estado" className="text-xs font-medium uppercase tracking-wider text-slate-500">
             Estado
@@ -220,18 +241,25 @@ export async function ProductoEditor({
             <option value="inactivo">Inactivo</option>
           </select>
         </div>
-        <div>
-          <label htmlFor="imagenes" className="text-xs font-medium uppercase tracking-wider text-slate-500">
-            URLs de imágenes (una por línea)
+        {mode === "edit" && imagenes.length > 0 ? (
+          <input type="hidden" name="imagenes" value={imagenes.join("\n")} />
+        ) : null}
+        <div className="space-y-2">
+          <label
+            htmlFor="imagen_archivos"
+            className="text-xs font-medium uppercase tracking-wider text-slate-500"
+          >
+            Subir imágenes
           </label>
-          <textarea
-            id="imagenes"
-            name="imagenes"
-            rows={4}
-            className={field}
-            placeholder="https://..."
-            defaultValue={imagenes.join("\n")}
+          <input
+            id="imagen_archivos"
+            name="imagen_archivos"
+            type="file"
+            accept="image/jpeg,image/png,image/webp,image/gif"
+            multiple
+            className={`${field} py-2 file:mr-3 file:rounded-md file:border-0 file:bg-slate-700 file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-slate-200 hover:file:bg-slate-600`}
           />
+          <p className="text-xs text-slate-500">JPG, PNG, WebP o GIF, hasta 5 MB por archivo.</p>
         </div>
         <button
           type="submit"

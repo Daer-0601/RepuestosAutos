@@ -16,7 +16,7 @@ export default async function NuevoProductoPage({
   return (
     <AdminPageShell
       title="Nuevo producto"
-      description="El QR en etiqueta puede codificar el mismo texto que el código impreso."
+      description="Al guardar se asignan código y QR en secuencia (mismo valor). Podés adjuntar imágenes. Los precios de lista y utilidad se cargan después (p. ej. al ingresar compra)."
       error={sp.error}
     >
       <ProductoEditor mode="create" />

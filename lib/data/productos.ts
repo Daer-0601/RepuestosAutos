@@ -142,7 +142,7 @@ export async function countProductoQrPayload(
   return Number((rows[0] as { c: number }).c);
 }
 
-export async function insertProducto(input: {
+export type ProductoInsertInput = {
   codigo: string;
   qr_payload: string;
   codigo_pieza: string | null;
@@ -159,8 +159,15 @@ export async function insertProducto(input: {
   porcentaje_utilidad: number | null;
   punto_tope: number | null;
   estado: "activo" | "inactivo";
-}): Promise<number> {
-  const [res] = await pool.execute<ResultSetHeader>(
+};
+
+const LOCK_NEXT_PRODUCTO_CODIGO = "repuestos_next_producto_codigo_seq";
+
+export async function insertProductoWithConnection(
+  conn: PoolConnection,
+  input: ProductoInsertInput
+): Promise<number> {
+  const [res] = await conn.execute<ResultSetHeader>(
     `INSERT INTO productos (
       codigo, qr_payload, codigo_pieza, nombre, especificacion, repuesto, procedencia, medida,
       descripcion, unidad, marca_auto, precio_venta_lista_bs, precio_venta_lista_usd,
@@ -186,6 +193,67 @@ export async function insertProducto(input: {
     ]
   );
   return res.insertId;
+}
+
+/**
+ * Asigna código y QR en secuencia (siguiente id previsto, 6 dígitos) bajo bloqueo de sesión MySQL.
+ */
+export async function insertProductoConCodigoSecuencial(
+  input: Omit<ProductoInsertInput, "codigo" | "qr_payload">
+): Promise<{ id: number; codigo: string; qr_payload: string }> {
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const [lockRows] = await conn.query<RowDataPacket[]>(
+      "SELECT GET_LOCK(?, 20) AS l",
+      [LOCK_NEXT_PRODUCTO_CODIGO]
+    );
+    if (Number((lockRows[0] as { l: number }).l) !== 1) {
+      await conn.rollback();
+      throw new Error("No se pudo reservar el código de producto (lock).");
+    }
+    try {
+      const [rows] = await conn.query<RowDataPacket[]>(
+        `SELECT COALESCE(
+           (SELECT t.AUTO_INCREMENT FROM information_schema.TABLES t
+            WHERE t.TABLE_SCHEMA = DATABASE() AND t.TABLE_NAME = 'productos' LIMIT 1),
+           (SELECT COALESCE(MAX(p.id), 0) + 1 FROM productos p)
+         ) AS n`
+      );
+      const n = Number((rows[0] as { n: number | bigint | null }).n);
+      const codigo = String(n).padStart(6, "0");
+      const qr_payload = codigo;
+      const id = await insertProductoWithConnection(conn, {
+        ...input,
+        codigo,
+        qr_payload,
+      });
+      await conn.commit();
+      return { id, codigo, qr_payload };
+    } finally {
+      await conn.query("SELECT RELEASE_LOCK(?)", [LOCK_NEXT_PRODUCTO_CODIGO]);
+    }
+  } catch (e) {
+    await conn.rollback();
+    throw e;
+  } finally {
+    conn.release();
+  }
+}
+
+export async function insertProducto(input: ProductoInsertInput): Promise<number> {
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const id = await insertProductoWithConnection(conn, input);
+    await conn.commit();
+    return id;
+  } catch (e) {
+    await conn.rollback();
+    throw e;
+  } finally {
+    conn.release();
+  }
 }
 
 export type ProductoUpdateInput = {

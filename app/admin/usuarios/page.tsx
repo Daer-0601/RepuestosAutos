@@ -1,5 +1,6 @@
 import { AdminButtonLink } from "@/app/admin/_components/admin-button-link";
 import { AdminPageShell } from "@/app/admin/_components/admin-page-shell";
+import { etiquetaRolEspanol } from "@/lib/data/roles";
 import { listUsuarios } from "@/lib/data/usuarios";
 import type { Metadata } from "next";
 import Link from "next/link";
@@ -14,7 +15,7 @@ export default async function AdminUsuariosPage() {
   return (
     <AdminPageShell
       title="Usuarios"
-      description="Roles: Admin (sin sucursal), Cajero y Vendedor con sucursal obligatoria."
+      description="Roles: Administrador (sin sucursal), Cajero y Vendedor con sucursal obligatoria."
       actions={<AdminButtonLink href="/admin/usuarios/nueva">Nuevo usuario</AdminButtonLink>}
     >
       <div className="overflow-x-auto rounded-2xl border border-white/10 bg-slate-900/40">
@@ -41,7 +42,9 @@ export default async function AdminUsuariosPage() {
                 <tr key={u.id} className="hover:bg-white/[0.02]">
                   <td className="px-4 py-3 font-medium text-white">{u.nombre_completo}</td>
                   <td className="px-4 py-3 font-mono text-slate-300">{u.username}</td>
-                  <td className="px-4 py-3 text-slate-400">{u.rol_nombre}</td>
+                  <td className="px-4 py-3 text-slate-400">
+                    {etiquetaRolEspanol({ id: u.rol_id, nombre: u.rol_nombre })}
+                  </td>
                   <td className="px-4 py-3 text-slate-400">{u.sucursal_nombre ?? "—"}</td>
                   <td className="px-4 py-3">
                     <span

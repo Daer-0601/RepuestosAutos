@@ -40,3 +40,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# imágenes subidas (local)
+/public/uploads/productos/*
+!/public/uploads/productos/.gitkeep

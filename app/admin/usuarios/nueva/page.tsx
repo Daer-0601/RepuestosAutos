@@ -1,6 +1,6 @@
 import { AdminPageShell } from "@/app/admin/_components/admin-page-shell";
 import { createUsuarioAction } from "@/app/admin/usuarios/actions";
-import { listRoles } from "@/lib/data/roles";
+import { etiquetaRolEspanol, listRoles } from "@/lib/data/roles";
 import { listSucursales } from "@/lib/data/sucursales";
 import type { Metadata } from "next";
 
@@ -61,7 +61,7 @@ export default async function NuevoUsuarioPage({
           <select id="rol_id" name="rol_id" required className={field} defaultValue="2">
             {roles.map((r) => (
               <option key={r.id} value={r.id}>
-                {r.nombre}
+                {etiquetaRolEspanol(r)}
               </option>
             ))}
           </select>
