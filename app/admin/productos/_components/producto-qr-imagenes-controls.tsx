@@ -3,6 +3,7 @@
 import { Download, Images, Printer, QrCode, X } from "lucide-react";
 import QRCode from "qrcode";
 import { useEffect, useId, useState } from "react";
+import { createPortal } from "react-dom";
 
 const btnQrAction =
   "inline-flex items-center justify-center gap-1.5 rounded-lg border border-white/15 bg-slate-800/90 px-3 py-2 text-xs font-medium text-slate-100 hover:border-sky-500/40 hover:bg-slate-800";
@@ -87,6 +88,11 @@ export function ProductoQrImagenesControls({
   const [imgModal, setImgModal] = useState<{ codigo: string; urls: string[] } | null>(null);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [qrGenError, setQrGenError] = useState(false);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   const payloadEfectivo = (qrPayload || codigo).trim() || codigo;
 
@@ -134,6 +140,22 @@ export function ProductoQrImagenesControls({
     return () => window.removeEventListener("keydown", onKey);
   }, [qrModal, imgModal]);
 
+  /** Evita que el contenido “salte” al ocultarse la barra de scroll del body. */
+  useEffect(() => {
+    if (!qrModal && !imgModal) return;
+    const prevOverflow = document.body.style.overflow;
+    const prevPaddingRight = document.body.style.paddingRight;
+    const gap = typeof window !== "undefined" ? window.innerWidth - document.documentElement.clientWidth : 0;
+    document.body.style.overflow = "hidden";
+    if (gap > 0) {
+      document.body.style.paddingRight = `${gap}px`;
+    }
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      document.body.style.paddingRight = prevPaddingRight;
+    };
+  }, [qrModal, imgModal]);
+
   const openQr = (e: React.MouseEvent) => {
     onOpenInteraction?.(e);
     setQrModal({ codigo, payload: payloadEfectivo });
@@ -144,44 +166,37 @@ export function ProductoQrImagenesControls({
     setImgModal({ codigo, urls: imagenesUrls });
   };
 
-  return (
-    <>
-      <div className="flex items-center justify-center gap-0.5">
-        <button type="button" title="Ver código QR" className={btnIcon} onClick={openQr}>
-          <QrCode className={size === "sm" ? "h-3 w-3" : "h-3.5 w-3.5"} aria-hidden />
-        </button>
-        <button type="button" title="Ver imágenes" className={btnIcon} onClick={openImg}>
-          <Images className={size === "sm" ? "h-3 w-3" : "h-3.5 w-3.5"} aria-hidden />
-        </button>
-      </div>
+  const overlayClass =
+    "fixed inset-0 z-[200] flex items-center justify-center overflow-y-auto bg-black/70 p-4 backdrop-blur-sm";
 
-      {qrModal ? (
+  const qrOverlay =
+    mounted &&
+    qrModal &&
+    createPortal(
+      <div className={overlayClass} role="presentation" onClick={() => setQrModal(null)}>
         <div
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
-          role="presentation"
-          onClick={() => setQrModal(null)}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby={qrTitleId}
+          className="relative my-auto w-full max-w-sm rounded-2xl border border-white/15 bg-slate-900 p-5 shadow-xl"
+          onClick={(ev) => ev.stopPropagation()}
         >
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby={qrTitleId}
-            className="relative max-w-sm rounded-2xl border border-white/15 bg-slate-900 p-5 shadow-xl"
-            onClick={(ev) => ev.stopPropagation()}
+          <button
+            type="button"
+            className="absolute right-3 top-3 rounded-lg p-1 text-slate-400 hover:bg-white/10 hover:text-white"
+            onClick={() => setQrModal(null)}
+            aria-label="Cerrar"
           >
-            <button
-              type="button"
-              className="absolute right-3 top-3 rounded-lg p-1 text-slate-400 hover:bg-white/10 hover:text-white"
-              onClick={() => setQrModal(null)}
-              aria-label="Cerrar"
-            >
-              <X className="h-4 w-4" />
-            </button>
-            <h2 id={qrTitleId} className="pr-8 text-sm font-semibold text-white">
-              QR · {qrModal.codigo}
-            </h2>
-            <div className="mt-4 flex min-h-[280px] flex-col items-center justify-center gap-3">
+            <X className="h-4 w-4" />
+          </button>
+          <h2 id={qrTitleId} className="pr-8 text-sm font-semibold text-white">
+            QR · {qrModal.codigo}
+          </h2>
+          <div className="mt-4 flex w-full flex-col items-center gap-3">
+            {/* Caja fija para que el modal no se mueva al cargar el PNG */}
+            <div className="flex h-[296px] w-[296px] shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/5">
               {qrGenError ? (
-                <p className="text-center text-sm text-rose-400">No se pudo generar el código QR.</p>
+                <p className="px-2 text-center text-sm text-rose-400">No se pudo generar el código QR.</p>
               ) : qrDataUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
@@ -194,79 +209,94 @@ export function ProductoQrImagenesControls({
               ) : (
                 <p className="text-sm text-slate-500">Generando QR…</p>
               )}
-              <p className="max-w-full break-all text-center font-mono text-[11px] text-slate-400">
-                {qrModal.payload}
-              </p>
-              {qrDataUrl && !qrGenError ? (
-                <div className="flex flex-wrap justify-center gap-2">
-                  <button
-                    type="button"
-                    className={btnQrAction}
-                    onClick={() => downloadQrPng(qrDataUrl, qrModal.codigo)}
-                  >
-                    <Download className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                    Descargar PNG
-                  </button>
-                  <button
-                    type="button"
-                    className={btnQrAction}
-                    onClick={() => printQrWindow(qrDataUrl, qrModal)}
-                  >
-                    <Printer className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                    Imprimir
-                  </button>
-                </div>
-              ) : null}
             </div>
-          </div>
-        </div>
-      ) : null}
-
-      {imgModal ? (
-        <div
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
-          role="presentation"
-          onClick={() => setImgModal(null)}
-        >
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby={imgTitleId}
-            className="relative max-h-[85vh] w-full max-w-3xl overflow-y-auto rounded-2xl border border-white/15 bg-slate-900 p-5 shadow-xl"
-            onClick={(ev) => ev.stopPropagation()}
-          >
-            <button
-              type="button"
-              className="absolute right-3 top-3 z-10 rounded-lg p-1 text-slate-400 hover:bg-white/10 hover:text-white"
-              onClick={() => setImgModal(null)}
-              aria-label="Cerrar"
-            >
-              <X className="h-4 w-4" />
-            </button>
-            <h2 id={imgTitleId} className="pr-8 text-sm font-semibold text-white">
-              Imágenes · {imgModal.codigo}
-            </h2>
-            {imgModal.urls.length === 0 ? (
-              <p className="mt-6 text-center text-sm text-slate-500">Este producto no tiene imágenes cargadas.</p>
-            ) : (
-              <div className="mt-4 grid gap-4 sm:grid-cols-2">
-                {imgModal.urls.map((url, i) => (
-                  <a
-                    key={`${url}-${i}`}
-                    href={url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="block overflow-hidden rounded-xl border border-white/10 bg-slate-950/60 hover:border-sky-500/30"
-                  >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={url} alt="" className="mx-auto max-h-64 w-full object-contain" />
-                  </a>
-                ))}
+            <p className="max-w-full break-all text-center font-mono text-[11px] text-slate-400">
+              {qrModal.payload}
+            </p>
+            {qrDataUrl && !qrGenError ? (
+              <div className="flex flex-wrap justify-center gap-2">
+                <button
+                  type="button"
+                  className={btnQrAction}
+                  onClick={() => downloadQrPng(qrDataUrl, qrModal.codigo)}
+                >
+                  <Download className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                  Descargar PNG
+                </button>
+                <button
+                  type="button"
+                  className={btnQrAction}
+                  onClick={() => printQrWindow(qrDataUrl, qrModal)}
+                >
+                  <Printer className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                  Imprimir
+                </button>
               </div>
-            )}
+            ) : null}
           </div>
         </div>
-      ) : null}
+      </div>,
+      document.body
+    );
+
+  const imgOverlay =
+    mounted &&
+    imgModal &&
+    createPortal(
+      <div className={overlayClass} role="presentation" onClick={() => setImgModal(null)}>
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby={imgTitleId}
+          className="relative my-auto max-h-[85vh] w-full max-w-3xl overflow-y-auto rounded-2xl border border-white/15 bg-slate-900 p-5 shadow-xl"
+          onClick={(ev) => ev.stopPropagation()}
+        >
+          <button
+            type="button"
+            className="absolute right-3 top-3 z-10 rounded-lg p-1 text-slate-400 hover:bg-white/10 hover:text-white"
+            onClick={() => setImgModal(null)}
+            aria-label="Cerrar"
+          >
+            <X className="h-4 w-4" />
+          </button>
+          <h2 id={imgTitleId} className="pr-8 text-sm font-semibold text-white">
+            Imágenes · {imgModal.codigo}
+          </h2>
+          {imgModal.urls.length === 0 ? (
+            <p className="mt-6 text-center text-sm text-slate-500">Este producto no tiene imágenes cargadas.</p>
+          ) : (
+            <div className="mt-4 grid gap-4 sm:grid-cols-2">
+              {imgModal.urls.map((url, i) => (
+                <a
+                  key={`${url}-${i}`}
+                  href={url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="block overflow-hidden rounded-xl border border-white/10 bg-slate-950/60 hover:border-sky-500/30"
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={url} alt="" className="mx-auto max-h-64 w-full object-contain" />
+                </a>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>,
+      document.body
+    );
+
+  return (
+    <>
+      <div className="flex items-center justify-center gap-0.5">
+        <button type="button" title="Ver código QR" className={btnIcon} onClick={openQr}>
+          <QrCode className={size === "sm" ? "h-3 w-3" : "h-3.5 w-3.5"} aria-hidden />
+        </button>
+        <button type="button" title="Ver imágenes" className={btnIcon} onClick={openImg}>
+          <Images className={size === "sm" ? "h-3 w-3" : "h-3.5 w-3.5"} aria-hidden />
+        </button>
+      </div>
+      {qrOverlay}
+      {imgOverlay}
     </>
   );
 }
