@@ -203,9 +203,17 @@ export async function registrarIngresoCompra(input: IngresoCompraInput): Promise
   const totalBs = round2(calculadas.reduce((s, c) => s + c.totalBs, 0));
   const totalUsd = round4(calculadas.reduce((s, c) => s + c.totalUsd, 0));
 
+  /** Si el mismo producto va en más de una línea, no pisamos `productos` (lista/QR/etc.): cada línea queda en detalle y lotes. */
+  const lineasPorProducto = new Map<number, number>();
+  for (const line of input.lineas) {
+    lineasPorProducto.set(line.productoId, (lineasPorProducto.get(line.productoId) ?? 0) + 1);
+  }
+
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
+
+    const catalogoYaAplicado = new Set<number>();
 
     for (const c of calculadas) {
       const p = await getProducto(c.line.productoId);
@@ -215,9 +223,18 @@ export async function registrarIngresoCompra(input: IngresoCompraInput): Promise
       }
       const patch = buildProductoPatch(p, c.line);
       c.patch = patch;
-      await updateProductoWithConnection(conn, c.line.productoId, patch);
-      if (c.line.reemplazarImagenes) {
-        await replaceProductoImagenesWithConnection(conn, c.line.productoId, c.line.imagenesUrls);
+
+      const pid = c.line.productoId;
+      const repetidoEnEstaCompra = (lineasPorProducto.get(pid) ?? 0) > 1;
+      if (repetidoEnEstaCompra) {
+        continue;
+      }
+      if (!catalogoYaAplicado.has(pid)) {
+        catalogoYaAplicado.add(pid);
+        await updateProductoWithConnection(conn, pid, patch);
+        if (c.line.reemplazarImagenes) {
+          await replaceProductoImagenesWithConnection(conn, pid, c.line.imagenesUrls);
+        }
       }
     }
 

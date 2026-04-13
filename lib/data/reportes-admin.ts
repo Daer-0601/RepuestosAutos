@@ -216,8 +216,7 @@ export type TopProductoRow = {
 };
 
 /**
- * Por unidades vendidas. Tabla `venta_detalle` alineada a `compra_detalle`
- * (producto_id, cantidad, total_linea_bs / subtotal_linea_bs).
+ * Por unidades vendidas. `venta_detalle` expone `total_linea_bs` (no hay `subtotal_linea_bs`).
  */
 export async function topProductosPorPeriodo(
   periodo: PeriodoReporte,
@@ -230,7 +229,7 @@ export async function topProductosPorPeriodo(
     const [rows] = await pool.execute<RowDataPacket[]>(
       `SELECT p.codigo, p.nombre,
               SUM(d.cantidad) AS unidades,
-              COALESCE(SUM(COALESCE(d.total_linea_bs, d.subtotal_linea_bs)), 0) AS total_bs
+              COALESCE(SUM(d.total_linea_bs), 0) AS total_bs
        FROM venta_detalle d
        INNER JOIN ventas v ON v.id = d.venta_id
        INNER JOIN productos p ON p.id = d.producto_id

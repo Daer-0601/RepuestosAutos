@@ -1,3 +1,4 @@
+import { ProductoImagenesUrlsField } from "@/app/admin/productos/_components/producto-imagenes-urls-field";
 import { createProductoAction, updateProductoAction } from "@/app/admin/productos/actions";
 import { getProducto, listProductoImagenes } from "@/lib/data/productos";
 import { notFound } from "next/navigation";
@@ -241,15 +242,13 @@ export async function ProductoEditor({
             <option value="inactivo">Inactivo</option>
           </select>
         </div>
-        {mode === "edit" && imagenes.length > 0 ? (
-          <input type="hidden" name="imagenes" value={imagenes.join("\n")} />
-        ) : null}
+        {mode === "edit" ? <ProductoImagenesUrlsField initialUrls={imagenes} /> : null}
         <div className="space-y-2">
           <label
             htmlFor="imagen_archivos"
             className="text-xs font-medium uppercase tracking-wider text-slate-500"
           >
-            Subir imágenes
+            {mode === "edit" ? "Agregar imágenes (archivos)" : "Subir imágenes"}
           </label>
           <input
             id="imagen_archivos"

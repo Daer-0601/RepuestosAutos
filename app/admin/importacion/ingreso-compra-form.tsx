@@ -1,6 +1,7 @@
 "use client";
 
 import { AdminButtonLink } from "@/app/admin/_components/admin-button-link";
+import { ProductoQrImagenesControls } from "@/app/admin/productos/_components/producto-qr-imagenes-controls";
 import { AlertTriangle, CheckCircle2, Trash2, X } from "lucide-react";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -97,6 +98,13 @@ function fmt(n: number, d: number): string {
 }
 
 /** Texto para la columna descripción del ingreso: prioriza descripción, luego especificación, luego nombre. */
+function imagenesUrlsDesdeTexto(text: string): string[] {
+  return text
+    .split(/\r?\n/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
 function descripcionTextoParaLinea(
   descripcion: string | null | undefined,
   especificacion: string | null | undefined,
@@ -112,11 +120,11 @@ function descripcionTextoParaLinea(
 
 /** Anchos iniciales (px); se pueden estirar arrastrando el borde derecho del encabezado. */
 const DEFAULT_INGRESO_COL_WIDTHS = [
-  56, 200, 128, 88, 220, 72, 112, 104, 104, 64, 64, 96, 120, 48,
+  80, 200, 128, 88, 220, 72, 112, 104, 104, 64, 64, 96, 120, 48,
 ];
 
 const INGRESO_COL_LABELS = [
-  "Img",
+  "Img / QR",
   "Cód. barra",
   "Cód. pieza",
   "Medida",
@@ -864,17 +872,27 @@ export function IngresoCompraForm({
                   <Fragment key={line.key}>
                     <tr className="hover:bg-white/[0.02]">
                       <td className={cellPad}>
-                        <div className="flex h-11 w-11 items-center justify-center overflow-hidden rounded border border-white/10 bg-black/40">
-                          {line.imagenPreview ? (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img
-                              src={line.imagenPreview}
-                              alt=""
-                              className="h-full w-full object-cover"
+                        <div className="flex flex-col items-center gap-1.5">
+                          <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded border border-white/10 bg-black/40">
+                            {line.imagenPreview ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img
+                                src={line.imagenPreview}
+                                alt=""
+                                className="h-full w-full object-cover"
+                              />
+                            ) : (
+                              <span className="text-[9px] text-slate-600">—</span>
+                            )}
+                          </div>
+                          {line.productoId ? (
+                            <ProductoQrImagenesControls
+                              codigo={line.codigoLabel}
+                              qrPayload={line.qrPayload}
+                              imagenesUrls={imagenesUrlsDesdeTexto(line.imagenesText)}
+                              size="sm"
                             />
-                          ) : (
-                            <span className="text-[9px] text-slate-600">—</span>
-                          )}
+                          ) : null}
                         </div>
                       </td>
                       <td className={cellPad}>

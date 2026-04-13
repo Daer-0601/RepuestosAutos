@@ -1,71 +1,13 @@
 "use client";
 
+import { ProductoQrImagenesControls } from "@/app/admin/productos/_components/producto-qr-imagenes-controls";
 import type { SucursalRow } from "@/lib/data/sucursales";
 import type { ProductoCatalogoRowConStock } from "@/lib/data/productos-catalogo";
-import { Download, Images, Printer, QrCode, X } from "lucide-react";
-import QRCode from "qrcode";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 const COL_MIN = 40;
 const cellPad = "px-2 py-1.5";
-
-const btnIcon =
-  "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-white/15 bg-slate-900/80 text-slate-200 hover:border-sky-500/40 hover:bg-sky-950/50 hover:text-sky-100";
-
-const btnQrAction =
-  "inline-flex items-center justify-center gap-1.5 rounded-lg border border-white/15 bg-slate-800/90 px-3 py-2 text-xs font-medium text-slate-100 hover:border-sky-500/40 hover:bg-slate-800";
-
-function escHtml(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
-}
-
-function downloadQrPng(dataUrl: string, codigo: string) {
-  const safe = codigo.replace(/[^\w.-]+/g, "_").slice(0, 80) || "producto";
-  const a = document.createElement("a");
-  a.href = dataUrl;
-  a.download = `qr-${safe}.png`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-}
-
-function printQrWindow(dataUrl: string, modal: { codigo: string; payload: string }) {
-  const w = window.open("", "_blank");
-  if (!w) {
-    window.alert("No se pudo abrir la ventana de impresión. Permití ventanas emergentes para este sitio.");
-    return;
-  }
-  const c = escHtml(modal.codigo);
-  const p = escHtml(modal.payload);
-  w.document.open();
-  w.document.write(
-    `<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"/><title>QR ${c}</title>
-<style>
-  @page { margin: 14mm; }
-  body { font-family: system-ui, sans-serif; text-align: center; padding: 16px; margin: 0; }
-  h1 { font-size: 14px; font-weight: 600; margin: 0 0 12px; }
-  img { width: 280px; height: 280px; max-width: 100%; }
-  .payload { font-size: 11px; word-break: break-all; margin-top: 12px; font-family: ui-monospace, monospace; color: #333; }
-</style></head><body>
-<h1>QR · ${c}</h1>
-<img src="${dataUrl}" width="280" height="280" alt="Código QR" />
-<p class="payload">${p}</p>
-</body></html>`
-  );
-  w.document.close();
-  w.focus();
-  setTimeout(() => {
-    w.print();
-    w.addEventListener("afterprint", () => {
-      try {
-        w.close();
-      } catch {
-        /* ignore */
-      }
-    });
-  }, 200);
-}
 
 function defaultColWidths(sucCount: number): number[] {
   const base = [88, 72, 112, 88, 220, 72, 72, 72, 88, 56, 120, 72, 88, 88, 56];
@@ -93,59 +35,11 @@ export function ProductosCatalogoTabla({
   const resizeDragRef = useRef<{ index: number; startX: number; startWidth: number } | null>(null);
   /** Fila marcada al hacer clic (mismo clic desmarca). */
   const [marcadoId, setMarcadoId] = useState<number | null>(null);
-  const [qrModal, setQrModal] = useState<{ codigo: string; payload: string } | null>(null);
-  const [imgModal, setImgModal] = useState<{ codigo: string; urls: string[] } | null>(null);
-  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
-  const [qrGenError, setQrGenError] = useState(false);
-
-  useEffect(() => {
-    if (!qrModal) {
-      setQrDataUrl(null);
-      setQrGenError(false);
-      return;
-    }
-    let cancelled = false;
-    setQrDataUrl(null);
-    setQrGenError(false);
-    QRCode.toDataURL(qrModal.payload, {
-      width: 280,
-      margin: 2,
-      errorCorrectionLevel: "M",
-      color: { dark: "#0f172a", light: "#ffffff" },
-    })
-      .then((dataUrl) => {
-        if (!cancelled) {
-          setQrDataUrl(dataUrl);
-          setQrGenError(false);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setQrDataUrl(null);
-          setQrGenError(true);
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [qrModal]);
 
   useEffect(() => {
     const need = 17 + sucursales.length;
     setColWidths((prev) => (prev.length === need ? prev : defaultColWidths(sucursales.length)));
   }, [sucursales.length]);
-
-  useEffect(() => {
-    if (!qrModal && !imgModal) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        setQrModal(null);
-        setImgModal(null);
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [qrModal, imgModal]);
 
   useEffect(() => {
     setMarcadoId((id) => {
@@ -309,31 +203,12 @@ export function ProductosCatalogoTabla({
                   }`}
                 >
                   <td className={`${cellPad} whitespace-nowrap`}>
-                    <div className="flex items-center justify-center gap-1">
-                      <button
-                        type="button"
-                        title="Ver código QR"
-                        className={btnIcon}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          const payload = (r.qr_payload || r.codigo).trim() || r.codigo;
-                          setQrModal({ codigo: r.codigo, payload });
-                        }}
-                      >
-                        <QrCode className="h-3.5 w-3.5" aria-hidden />
-                      </button>
-                      <button
-                        type="button"
-                        title="Ver imágenes"
-                        className={btnIcon}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setImgModal({ codigo: r.codigo, urls: r.imagenes_urls });
-                        }}
-                      >
-                        <Images className="h-3.5 w-3.5" aria-hidden />
-                      </button>
-                    </div>
+                    <ProductoQrImagenesControls
+                      codigo={r.codigo}
+                      qrPayload={r.qr_payload}
+                      imagenesUrls={r.imagenes_urls}
+                      onOpenInteraction={(e) => e.stopPropagation()}
+                    />
                   </td>
                   <td className={`${cellPad} truncate font-mono ${tone.mono}`}>{r.codigo}</td>
                   <td className={`${cellPad} truncate font-mono ${tone.mono}`}>{r.codigo_pieza ?? "—"}</td>
@@ -379,120 +254,6 @@ export function ProductosCatalogoTabla({
           )}
         </tbody>
       </table>
-
-      {qrModal ? (
-        <div
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
-          role="presentation"
-          onClick={() => setQrModal(null)}
-        >
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="qr-modal-title"
-            className="relative max-w-sm rounded-2xl border border-white/15 bg-slate-900 p-5 shadow-xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <button
-              type="button"
-              className="absolute right-3 top-3 rounded-lg p-1 text-slate-400 hover:bg-white/10 hover:text-white"
-              onClick={() => setQrModal(null)}
-              aria-label="Cerrar"
-            >
-              <X className="h-4 w-4" />
-            </button>
-            <h2 id="qr-modal-title" className="pr-8 text-sm font-semibold text-white">
-              QR · {qrModal.codigo}
-            </h2>
-            <div className="mt-4 flex min-h-[280px] flex-col items-center justify-center gap-3">
-              {qrGenError ? (
-                <p className="text-center text-sm text-rose-400">No se pudo generar el código QR.</p>
-              ) : qrDataUrl ? (
-                // data URL generada en cliente con `qrcode`
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={qrDataUrl}
-                  alt=""
-                  width={280}
-                  height={280}
-                  className="rounded-lg border border-white/10 bg-white p-2"
-                />
-              ) : (
-                <p className="text-sm text-slate-500">Generando QR…</p>
-              )}
-              <p className="max-w-full break-all text-center font-mono text-[11px] text-slate-400">
-                {qrModal.payload}
-              </p>
-              {qrDataUrl && !qrGenError ? (
-                <div className="flex flex-wrap justify-center gap-2">
-                  <button
-                    type="button"
-                    className={btnQrAction}
-                    onClick={() => downloadQrPng(qrDataUrl, qrModal.codigo)}
-                  >
-                    <Download className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                    Descargar PNG
-                  </button>
-                  <button
-                    type="button"
-                    className={btnQrAction}
-                    onClick={() => printQrWindow(qrDataUrl, qrModal)}
-                  >
-                    <Printer className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                    Imprimir
-                  </button>
-                </div>
-              ) : null}
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      {imgModal ? (
-        <div
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
-          role="presentation"
-          onClick={() => setImgModal(null)}
-        >
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="img-modal-title"
-            className="relative max-h-[85vh] w-full max-w-3xl overflow-y-auto rounded-2xl border border-white/15 bg-slate-900 p-5 shadow-xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <button
-              type="button"
-              className="absolute right-3 top-3 z-10 rounded-lg p-1 text-slate-400 hover:bg-white/10 hover:text-white"
-              onClick={() => setImgModal(null)}
-              aria-label="Cerrar"
-            >
-              <X className="h-4 w-4" />
-            </button>
-            <h2 id="img-modal-title" className="pr-8 text-sm font-semibold text-white">
-              Imágenes · {imgModal.codigo}
-            </h2>
-            {imgModal.urls.length === 0 ? (
-              <p className="mt-6 text-center text-sm text-slate-500">Este producto no tiene imágenes cargadas.</p>
-            ) : (
-              <div className="mt-4 grid gap-4 sm:grid-cols-2">
-                {imgModal.urls.map((url, i) => (
-                  <a
-                    key={`${url}-${i}`}
-                    href={url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="block overflow-hidden rounded-xl border border-white/10 bg-slate-950/60 hover:border-sky-500/30"
-                  >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={url} alt="" className="mx-auto max-h-64 w-full object-contain" />
-                  </a>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      ) : null}
     </div>
   );
 }

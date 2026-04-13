@@ -4,7 +4,8 @@ import type { SslOptions } from "mysql2";
 
 /**
  * Opciones TLS para mysql2 cuando DATABASE_SSL=true.
- * Si DATABASE_SSL_CA apunta a un PEM (ruta relativa al cwd o absoluta), se usa como CA.
+ * - `DATABASE_SSL_CA_PEM`: contenido PEM del CA (ideal en Vercel, sin archivo en disco).
+ * - `DATABASE_SSL_CA`: ruta a un PEM (relativa al cwd o absoluta).
  */
 export function getMysqlSslOptions(): SslOptions | undefined {
   if (process.env.DATABASE_SSL !== "true") {
@@ -13,8 +14,15 @@ export function getMysqlSslOptions(): SslOptions | undefined {
 
   const rejectUnauthorized =
     process.env.DATABASE_SSL_REJECT_UNAUTHORIZED !== "false";
-  const caFile = process.env.DATABASE_SSL_CA;
+  const caPem = process.env.DATABASE_SSL_CA_PEM?.trim();
+  if (caPem) {
+    return {
+      ca: caPem,
+      rejectUnauthorized,
+    };
+  }
 
+  const caFile = process.env.DATABASE_SSL_CA;
   if (caFile) {
     const resolved = path.isAbsolute(caFile)
       ? caFile
