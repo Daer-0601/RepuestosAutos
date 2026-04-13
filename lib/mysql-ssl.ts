@@ -27,13 +27,17 @@ export function getMysqlSslOptions(): SslOptions | undefined {
     const resolved = path.isAbsolute(caFile)
       ? caFile
       : path.join(process.cwd(), caFile);
-    if (!fs.existsSync(resolved)) {
-      throw new Error(`DATABASE_SSL_CA no encontrado: ${resolved}`);
+    if (fs.existsSync(resolved)) {
+      return {
+        ca: fs.readFileSync(resolved),
+        rejectUnauthorized,
+      };
     }
-    return {
-      ca: fs.readFileSync(resolved),
-      rejectUnauthorized,
-    };
+    /* Vercel / CI: ca.pem no va al repo; usar DATABASE_SSL_CA_PEM en el host. */
+    console.warn(
+      `[mysql-ssl] DATABASE_SSL_CA no encontrado (${resolved}). ` +
+        `Definí DATABASE_SSL_CA_PEM o quitá DATABASE_SSL_CA. Se usa TLS sin CA en disco.`
+    );
   }
 
   return { rejectUnauthorized };
