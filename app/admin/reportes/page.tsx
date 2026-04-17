@@ -72,6 +72,8 @@ export default async function AdminReportesPage({
 
   return (
     <AdminPageShell
+      backHref="/admin"
+      backLabel="Inicio admin"
       title="Reportes"
       description={`${etiquetaPeriodo(periodo)} · ventas y compras confirmadas${
         nombreSucursalActiva ? ` · sucursal: ${nombreSucursalActiva}` : " · todas las sucursales"

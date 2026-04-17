@@ -11,7 +11,6 @@ const inpNum = `${inp} font-mono`;
 const cellPad = "border-b border-white/5 px-2 py-2 align-top";
 
 type SucursalOpt = { id: number; nombre: string };
-type ProveedorOpt = { id: number; nombre: string };
 
 type ProductoBusqueda = {
   id: number;
@@ -97,7 +96,7 @@ function fmt(n: number, d: number): string {
   return d === 2 ? round2(n).toFixed(2) : round4(n).toFixed(4);
 }
 
-/** Texto para la columna descripción del ingreso: prioriza descripción, luego especificación, luego nombre. */
+/** Texto para la columna descripción del ingreso: prioriza descripción y, si falta, usa nombre. */
 function imagenesUrlsDesdeTexto(text: string): string[] {
   return text
     .split(/\r?\n/)
@@ -107,13 +106,10 @@ function imagenesUrlsDesdeTexto(text: string): string[] {
 
 function descripcionTextoParaLinea(
   descripcion: string | null | undefined,
-  especificacion: string | null | undefined,
   nombre: string | null | undefined
 ): string {
   const d = descripcion?.trim();
   if (d) return d;
-  const e = especificacion?.trim();
-  if (e) return e;
   const n = nombre?.trim();
   return n ?? "";
 }
@@ -130,7 +126,7 @@ const INGRESO_COL_LABELS = [
   "Medida",
   "Descripción",
   "Ítems",
-  "P/Compra",
+  "P/Compra USD",
   "P/Venta Bs",
   "P/Venta USD",
   "Flete %",
@@ -144,16 +140,13 @@ const COL_MIN = 40;
 
 export function IngresoCompraForm({
   sucursales,
-  proveedoresIniciales,
   tipoCambio,
 }: {
   sucursales: SucursalOpt[];
-  proveedoresIniciales: ProveedorOpt[];
   tipoCambio: { id: number; valor_bs_por_usd: number } | null;
 }) {
-  const [proveedores, setProveedores] = useState(proveedoresIniciales);
   const [sucursalId, setSucursalId] = useState(sucursales[0]?.id ? String(sucursales[0].id) : "");
-  const [proveedorId, setProveedorId] = useState(proveedores[0]?.id ? String(proveedores[0].id) : "");
+  const [proveedorNombre, setProveedorNombre] = useState("");
   const [tipoPago, setTipoPago] = useState<string>("efectivo");
   const [pctFlete, setPctFlete] = useState("0");
   const [pctUtilidadGlobal, setPctUtilidadGlobal] = useState("0");
@@ -163,12 +156,6 @@ export function IngresoCompraForm({
   const [pending, setPending] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const [provModal, setProvModal] = useState(false);
-  const [provNombre, setProvNombre] = useState("");
-  const [provTel, setProvTel] = useState("");
-  const [provDir, setProvDir] = useState("");
-  const [provSaving, setProvSaving] = useState(false);
-  const [expandKey, setExpandKey] = useState<string | null>(null);
   const [colWidths, setColWidths] = useState<number[]>(() => [...DEFAULT_INGRESO_COL_WIDTHS]);
   const resizeDragRef = useRef<{ index: number; startX: number; startWidth: number } | null>(null);
   const compraFlashRef = useRef<HTMLDivElement | null>(null);
@@ -235,13 +222,12 @@ export function IngresoCompraForm({
         continue;
       }
       const cant = Math.max(0, Math.trunc(Number(line.cantidad) || 0));
-      const pBs = parseNumOrNull(line.precioCompraBs);
-      if (cant < 1 || pBs == null) {
+      const pUsd = parseNumOrNull(line.precioCompraUsd);
+      if (cant < 1 || pUsd == null) {
         porKey[line.key] = null;
         continue;
       }
-      const pUsd =
-        parseNumOrNull(line.precioCompraUsd) ?? (tcVal > 0 ? round4(pBs / tcVal) : 0);
+      const pBs = tcVal > 0 ? round2(pUsd * tcVal) : 0;
       const subBs = round2(cant * pBs);
       const subUsd = round4(cant * pUsd);
       sumSubBs += subBs;
@@ -289,14 +275,14 @@ export function IngresoCompraForm({
     const qtyTotal = lines.reduce((s, l) => {
       if (l.productoId == null) return s;
       const c = Math.trunc(Number(l.cantidad) || 0);
-      return s + (c >= 1 && parseNumOrNull(l.precioCompraBs) != null ? c : 0);
+      return s + (c >= 1 && parseNumOrNull(l.precioCompraUsd) != null ? c : 0);
     }, 0);
 
     return { porKey, sumSubBs, sumSubUsd, fleteTotal, totalBs, totalUsd, qtyTotal };
   }, [lines, pctFlete, fleteManualActivo, fleteManual, tcVal]);
 
   const itemsValidos = useMemo(
-    () => lines.filter((l) => l.productoId != null && parseNumOrNull(l.precioCompraBs) != null).length,
+    () => lines.filter((l) => l.productoId != null && parseNumOrNull(l.precioCompraUsd) != null).length,
     [lines]
   );
 
@@ -305,7 +291,8 @@ export function IngresoCompraForm({
     const u = Math.max(0, Number(utilStr) || 0);
     return targetLines.map((line) => {
       if (line.productoId == null) return line;
-      const pBs = parseNumOrNull(line.precioCompraBs);
+      const pUsd = parseNumOrNull(line.precioCompraUsd);
+      const pBs = pUsd != null && tcVal > 0 ? round2(pUsd * tcVal) : null;
       if (pBs == null || tcVal <= 0) return { ...line, porcentajeUtilidad: utilStr };
       const ventaBs = round2(pBs * (1 + u / 100));
       const ventaUsd = round4(ventaBs / tcVal);
@@ -325,20 +312,6 @@ export function IngresoCompraForm({
       if (!line) return next;
       const uGlob = Number(pctUtilidadGlobal) || 0;
 
-      if ("precioCompraBs" in patch && line.productoId != null) {
-        const pBs = parseNumOrNull(line.precioCompraBs);
-        let updated = { ...line };
-        if (pBs != null && tcVal > 0) {
-          updated.precioCompraUsd = fmt(round4(pBs / tcVal), 4);
-          if (uGlob >= 0) {
-            const ventaBs = round2(pBs * (1 + uGlob / 100));
-            updated.precioVentaBs = fmt(ventaBs, 2);
-            updated.precioVentaUsd = fmt(round4(ventaBs / tcVal), 4);
-          }
-        }
-        return next.map((l) => (l.key === key ? updated : l));
-      }
-
       if ("precioCompraUsd" in patch && line.productoId != null) {
         const pUsd = parseNumOrNull(line.precioCompraUsd);
         let updated = { ...line };
@@ -350,6 +323,8 @@ export function IngresoCompraForm({
             updated.precioVentaBs = fmt(ventaBs, 2);
             updated.precioVentaUsd = fmt(round4(ventaBs / tcVal), 4);
           }
+        } else if (pUsd == null) {
+          updated.precioCompraBs = "";
         }
         return next.map((l) => (l.key === key ? updated : l));
       }
@@ -400,7 +375,7 @@ export function IngresoCompraForm({
     });
   }
 
-  const buscarProductos = useCallback(async (key: string, texto: string, modo: "barra" | "pieza") => {
+  const buscarProductos = useCallback(async (key: string, texto: string) => {
     const q = texto.trim();
     if (!q) {
       setLines((prev) =>
@@ -410,10 +385,9 @@ export function IngresoCompraForm({
     }
     setLines((prev) => prev.map((l) => (l.key === key ? { ...l, buscando: true } : l)));
     try {
-      const res = await fetch(
-        `/api/admin/productos/buscar?q=${encodeURIComponent(q)}&modo=${modo}`,
-        { credentials: "same-origin" }
-      );
+      const res = await fetch(`/api/admin/productos/buscar?q=${encodeURIComponent(q)}&modo=barra`, {
+        credentials: "same-origin",
+      });
       const data = (await res.json()) as { productos?: ProductoBusqueda[] };
       const productos = data.productos ?? [];
       setLines((prev) =>
@@ -440,7 +414,7 @@ export function IngresoCompraForm({
           codigoPieza: p.codigo_pieza ?? "",
           qrPayload: p.qr_payload ?? "",
           medida: p.medida ?? "",
-          descripcion: descripcionTextoParaLinea(p.descripcion, p.especificacion, p.nombre),
+          descripcion: descripcionTextoParaLinea(p.descripcion, p.nombre),
           precioVentaBs: p.precio_venta_lista_bs ?? "",
           precioVentaUsd: p.precio_venta_lista_usd ?? "",
           porcentajeUtilidad: p.porcentaje_utilidad ?? pctUtilidadGlobal,
@@ -478,7 +452,7 @@ export function IngresoCompraForm({
             codigoPieza: pr.codigo_pieza ?? l.codigoPieza,
             qrPayload: pr.qr_payload ?? l.qrPayload,
             medida: pr.medida ?? "",
-            descripcion: descripcionTextoParaLinea(pr.descripcion, pr.especificacion, pr.nombre),
+            descripcion: descripcionTextoParaLinea(pr.descripcion, pr.nombre),
             precioVentaBs: pr.precio_venta_lista_bs ?? l.precioVentaBs,
             precioVentaUsd: pr.precio_venta_lista_usd ?? l.precioVentaUsd,
             porcentajeUtilidad: pr.porcentaje_utilidad ?? l.porcentajeUtilidad,
@@ -494,43 +468,6 @@ export function IngresoCompraForm({
     }
   }
 
-  async function guardarProveedor(e: React.FormEvent) {
-    e.preventDefault();
-    setProvSaving(true);
-    try {
-      const res = await fetch("/api/admin/proveedores", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "same-origin",
-        body: JSON.stringify({
-          nombre: provNombre,
-          telefono: provTel || null,
-          direccion: provDir || null,
-        }),
-      });
-      const data = (await res.json()) as { error?: string; id?: number; nombre?: string };
-      if (!res.ok) {
-        setErr(data.error ?? "No se pudo crear el proveedor");
-        return;
-      }
-      if (data.id && data.nombre) {
-        setProveedores((prev) =>
-          [...prev, { id: data.id!, nombre: data.nombre! }].sort((a, b) => a.nombre.localeCompare(b.nombre))
-        );
-        setProveedorId(String(data.id));
-      }
-      setProvModal(false);
-      setProvNombre("");
-      setProvTel("");
-      setProvDir("");
-      setErr(null);
-    } catch {
-      setErr("Error de red al crear proveedor");
-    } finally {
-      setProvSaving(false);
-    }
-  }
-
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setErr(null);
@@ -542,13 +479,13 @@ export function IngresoCompraForm({
     }
 
     const sid = Number(sucursalId);
-    const pid = Number(proveedorId);
+    const proveedorNombreLimpio = proveedorNombre.trim();
     if (!Number.isFinite(sid) || sid < 1) {
       setErr("Elegí sucursal destino del stock.");
       return;
     }
-    if (!Number.isFinite(pid) || pid < 1) {
-      setErr("Elegí proveedor.");
+    if (!proveedorNombreLimpio) {
+      setErr("Escribí el proveedor.");
       return;
     }
 
@@ -557,12 +494,12 @@ export function IngresoCompraForm({
       const line = lines[i];
       if (line.productoId == null) continue;
       const cant = Math.trunc(Number(line.cantidad) || 0);
-      const pBs = parseNumOrNull(line.precioCompraBs);
-      if (cant < 1 || pBs == null || pBs < 0) {
-        setErr(`Ítem ${i + 1}: completá cantidad y precio de compra (Bs).`);
+      const pUsd = parseNumOrNull(line.precioCompraUsd);
+      if (cant < 1 || pUsd == null || pUsd < 0) {
+        setErr(`Ítem ${i + 1}: completá cantidad y precio de compra (USD).`);
         return;
       }
-      const pUsdRaw = line.precioCompraUsd.trim();
+      const pBs = tcVal > 0 ? round2(pUsd * tcVal) : 0;
       const imagenesUrls = line.imagenesText
         .split(/[\n,]+/)
         .map((s) => s.trim())
@@ -572,7 +509,7 @@ export function IngresoCompraForm({
         productoId: line.productoId,
         cantidad: cant,
         precioCompraUnitBs: pBs,
-        precioCompraUnitUsd: pUsdRaw === "" ? null : parseNumOrNull(pUsdRaw),
+        precioCompraUnitUsd: pUsd,
         precioVentaRefBs: parseNumOrNull(line.precioVentaBs),
         precioVentaRefUsd: parseNumOrNull(line.precioVentaUsd),
         porcentajeUtilidad: parseNumOrNull(line.porcentajeUtilidad),
@@ -599,7 +536,7 @@ export function IngresoCompraForm({
         credentials: "same-origin",
         body: JSON.stringify({
           sucursalId: sid,
-          proveedorId: pid,
+          proveedorNombre: proveedorNombreLimpio,
           tipoPago,
           tipoCambioId: tipoCambio.id,
           tipoCambioSnapshot: tipoCambio.valor_bs_por_usd,
@@ -733,30 +670,14 @@ export function IngresoCompraForm({
               <label className="block text-[10px] font-semibold uppercase tracking-wide text-slate-500">
                 Proveedor *
               </label>
-              <div className="flex gap-1">
-                <select
-                  required
-                  value={proveedorId}
-                  onChange={(e) => setProveedorId(e.target.value)}
-                  className={`${inp} flex-1`}
-                  disabled={pending}
-                >
-                  <option value="">Seleccioná…</option>
-                  {proveedores.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.nombre}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  type="button"
-                  onClick={() => setProvModal(true)}
-                  className="shrink-0 rounded border border-sky-500/50 bg-sky-600 px-2.5 text-sm font-bold text-white hover:bg-sky-500"
-                  title="Nuevo proveedor"
-                >
-                  +
-                </button>
-              </div>
+              <input
+                required
+                value={proveedorNombre}
+                onChange={(e) => setProveedorNombre(e.target.value)}
+                className={inp}
+                disabled={pending}
+                placeholder="Escribí el nombre del proveedor"
+              />
             </div>
             <div className="lg:col-span-2">
               <label className="block text-[10px] font-semibold uppercase tracking-wide text-slate-500">
@@ -861,10 +782,8 @@ export function IngresoCompraForm({
               {lines.map((line) => {
                 const resFila = resumenLineas.porKey[line.key];
                 const cant = Math.trunc(Number(line.cantidad) || 0);
-                const pBs = parseNumOrNull(line.precioCompraBs);
-                const pUsd =
-                  parseNumOrNull(line.precioCompraUsd) ??
-                  (pBs != null && tcVal > 0 ? round4(pBs / tcVal) : null);
+                const pUsd = parseNumOrNull(line.precioCompraUsd);
+                const pBs = pUsd != null && tcVal > 0 ? round2(pUsd * tcVal) : null;
                 const fletePctSobreCosto =
                   resFila && resFila.subBs > 0 ? round2((100 * resFila.flete) / resFila.subBs) : 0;
 
@@ -927,7 +846,7 @@ export function IngresoCompraForm({
                               onKeyDown={(e) => {
                                 if (e.key === "Enter") {
                                   e.preventDefault();
-                                  void buscarProductos(line.key, line.busqueda, "barra");
+                                  void buscarProductos(line.key, line.busqueda);
                                 }
                               }}
                               className={inp}
@@ -936,7 +855,7 @@ export function IngresoCompraForm({
                             />
                             <button
                               type="button"
-                              onClick={() => buscarProductos(line.key, line.busqueda, "barra")}
+                              onClick={() => buscarProductos(line.key, line.busqueda)}
                               disabled={pending || line.buscando}
                               className="w-full rounded-lg bg-slate-700 py-2 text-xs font-medium text-white hover:bg-slate-600"
                             >
@@ -977,26 +896,10 @@ export function IngresoCompraForm({
                         <input
                           value={line.codigoPieza}
                           onChange={(e) => updateLine(line.key, { codigoPieza: e.target.value })}
-                          onKeyDown={(e) => {
-                            if (!line.productoId && e.key === "Enter") {
-                              e.preventDefault();
-                              void buscarProductos(line.key, line.codigoPieza, "pieza");
-                            }
-                          }}
                           className={inp}
-                          disabled={pending}
-                          placeholder={line.productoId ? "" : "Cód. pieza…"}
+                          disabled={pending || !line.productoId}
+                          placeholder=""
                         />
-                        {!line.productoId ? (
-                          <button
-                            type="button"
-                            onClick={() => buscarProductos(line.key, line.codigoPieza, "pieza")}
-                            disabled={pending || line.buscando}
-                            className="mt-1 w-full rounded-lg bg-slate-700 py-2 text-xs font-medium text-white hover:bg-slate-600"
-                          >
-                            {line.buscando ? "…" : "Buscar"}
-                          </button>
-                        ) : null}
                       </td>
                       <td className={cellPad}>
                         <input
@@ -1014,13 +917,6 @@ export function IngresoCompraForm({
                           className={inp}
                           disabled={pending || !line.productoId}
                         />
-                        <button
-                          type="button"
-                          onClick={() => setExpandKey((k) => (k === line.key ? null : line.key))}
-                          className="mt-1 text-[10px] text-sky-400 hover:underline"
-                        >
-                          {expandKey === line.key ? "Ocultar extras" : "QR · imágenes"}
-                        </button>
                       </td>
                       <td className={`${cellPad} text-center`}>
                         <input
@@ -1034,14 +930,14 @@ export function IngresoCompraForm({
                       </td>
                       <td className={cellPad}>
                         <input
-                          value={line.precioCompraBs}
-                          onChange={(e) => updateLine(line.key, { precioCompraBs: e.target.value })}
+                          value={line.precioCompraUsd}
+                          onChange={(e) => updateLine(line.key, { precioCompraUsd: e.target.value })}
                           className={inpNum}
                           disabled={pending || !line.productoId}
                           inputMode="decimal"
                         />
                         <p className="mt-0.5 font-mono text-[10px] text-slate-400">
-                          [{pUsd != null ? fmt(pUsd, 4) : "—"}] $us.
+                          [{pBs != null ? fmt(pBs, 2) : "—"}] Bs.
                         </p>
                       </td>
                       <td className={cellPad}>
@@ -1115,44 +1011,6 @@ export function IngresoCompraForm({
                         </button>
                       </td>
                     </tr>
-                    {expandKey === line.key ? (
-                      <tr className="bg-black/25">
-                        <td colSpan={14} className="px-4 py-2">
-                          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                            <div>
-                              <label className="text-[10px] text-slate-500">QR payload</label>
-                              <input
-                                value={line.qrPayload}
-                                onChange={(e) => updateLine(line.key, { qrPayload: e.target.value })}
-                                className={inp}
-                                disabled={pending}
-                              />
-                            </div>
-                            <div className="sm:col-span-2">
-                              <label className="text-[10px] text-slate-500">URLs imágenes (una por línea)</label>
-                              <textarea
-                                value={line.imagenesText}
-                                onChange={(e) => updateLine(line.key, { imagenesText: e.target.value })}
-                                rows={2}
-                                className={inp}
-                                disabled={pending}
-                              />
-                              <label className="mt-1 flex items-center gap-2 text-[10px] text-slate-400">
-                                <input
-                                  type="checkbox"
-                                  checked={line.reemplazarImagenes}
-                                  onChange={(e) =>
-                                    updateLine(line.key, { reemplazarImagenes: e.target.checked })
-                                  }
-                                  disabled={pending}
-                                />
-                                Reemplazar galería del producto
-                              </label>
-                            </div>
-                          </div>
-                        </td>
-                      </tr>
-                    ) : null}
                   </Fragment>
                 );
               })}
@@ -1197,49 +1055,6 @@ export function IngresoCompraForm({
         </div>
       </form>
 
-      {provModal ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
-          <div className="w-full max-w-md rounded-xl border border-white/10 bg-slate-900 p-5 shadow-xl">
-            <h3 className="text-sm font-semibold text-white">Nuevo proveedor</h3>
-            <form onSubmit={guardarProveedor} className="mt-3 space-y-2">
-              <div>
-                <label className="text-xs text-slate-500">Nombre *</label>
-                <input
-                  value={provNombre}
-                  onChange={(e) => setProvNombre(e.target.value)}
-                  className={inp}
-                  required
-                  minLength={2}
-                />
-              </div>
-              <div>
-                <label className="text-xs text-slate-500">Teléfono</label>
-                <input value={provTel} onChange={(e) => setProvTel(e.target.value)} className={inp} />
-              </div>
-              <div>
-                <label className="text-xs text-slate-500">Dirección</label>
-                <textarea value={provDir} onChange={(e) => setProvDir(e.target.value)} className={inp} rows={2} />
-              </div>
-              <div className="flex justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setProvModal(false)}
-                  className="rounded-lg px-3 py-2 text-xs text-slate-400 hover:bg-white/5"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={provSaving}
-                  className="rounded-lg bg-sky-600 px-4 py-2 text-xs font-semibold text-white hover:bg-sky-500 disabled:opacity-50"
-                >
-                  {provSaving ? "Guardando…" : "Guardar"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      ) : null}
     </div>
   );
 }

@@ -17,7 +17,7 @@ export default async function EditarProductoPage({ params, searchParams }: Props
   const sp = await searchParams;
 
   return (
-    <AdminPageShell title="Editar producto" error={sp.error}>
+    <AdminPageShell backHref="/admin/productos" backLabel="Productos" title="Editar producto" error={sp.error}>
       <ProductoEditor mode="edit" id={id} />
     </AdminPageShell>
   );

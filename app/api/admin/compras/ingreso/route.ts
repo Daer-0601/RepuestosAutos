@@ -4,6 +4,7 @@ import {
   type LineaIngresoInput,
   type TipoPagoCompra,
 } from "@/lib/data/compras-ingreso";
+import { ensureProveedorActivoPorNombre, getProveedorActivo } from "@/lib/data/proveedores";
 import { getUltimoTipoCambio } from "@/lib/data/tipo-cambio";
 import { revalidatePath } from "next/cache";
 import { NextResponse } from "next/server";
@@ -81,7 +82,8 @@ export async function POST(request: Request) {
 
   const b = body as Record<string, unknown>;
   const sucursalId = Number(b.sucursalId);
-  const proveedorId = Number(b.proveedorId);
+  const proveedorIdRaw = Number(b.proveedorId);
+  const proveedorNombre = typeof b.proveedorNombre === "string" ? b.proveedorNombre.trim() : "";
   const tipoPagoRaw = typeof b.tipoPago === "string" ? b.tipoPago : "";
   const pctFlete = Number(b.pctFlete ?? 0);
   const fleteManual =
@@ -91,9 +93,6 @@ export async function POST(request: Request) {
 
   if (!Number.isFinite(sucursalId) || sucursalId < 1) {
     return NextResponse.json({ error: "Sucursal inválida." }, { status: 400 });
-  }
-  if (!Number.isFinite(proveedorId) || proveedorId < 1) {
-    return NextResponse.json({ error: "Proveedor inválido." }, { status: 400 });
   }
   if (!isTipoPago(tipoPagoRaw)) {
     return NextResponse.json({ error: "Tipo de pago inválido." }, { status: 400 });
@@ -132,6 +131,23 @@ export async function POST(request: Request) {
 
   const tipoCambioId = Number.isFinite(tcBodyId) && tcBodyId === ultimo.id ? tcBodyId : ultimo.id;
   const tipoCambioSnapshot = Number.isFinite(tcBodyVal) && tcBodyVal > 0 ? tcBodyVal : ultimo.valor_bs_por_usd;
+
+  let proveedorId = Number.isFinite(proveedorIdRaw) && proveedorIdRaw > 0 ? proveedorIdRaw : 0;
+  if (proveedorId < 1) {
+    if (!proveedorNombre) {
+      return NextResponse.json({ error: "Proveedor inválido." }, { status: 400 });
+    }
+    const prov = await ensureProveedorActivoPorNombre(proveedorNombre);
+    if (!prov) {
+      return NextResponse.json({ error: "Proveedor inválido." }, { status: 400 });
+    }
+    proveedorId = prov.id;
+  } else {
+    const prov = await getProveedorActivo(proveedorId);
+    if (!prov) {
+      return NextResponse.json({ error: "Proveedor inválido." }, { status: 400 });
+    }
+  }
 
   const result = await registrarIngresoCompra({
     usuarioId: admin.userId,

@@ -1,4 +1,5 @@
 import { ProductoImagenesUrlsField } from "@/app/admin/productos/_components/producto-imagenes-urls-field";
+import { ProductoCreateDraftPersist } from "@/app/admin/productos/_components/producto-create-draft-persist";
 import { createProductoAction, updateProductoAction } from "@/app/admin/productos/actions";
 import { getProducto, listProductoImagenes } from "@/lib/data/productos";
 import { notFound } from "next/navigation";
@@ -19,13 +20,19 @@ export async function ProductoEditor({
   }
   const imagenes = mode === "edit" && id ? await listProductoImagenes(id) : [];
   const action = mode === "create" ? createProductoAction : updateProductoAction;
+  const createFormId = "nuevo-producto-form";
 
   const unidadDefault =
     product?.unidad === "JGO" || product?.unidad === "PZA" ? product.unidad : "PZA";
 
   return (
     <div className="max-w-2xl space-y-4 rounded-2xl border border-white/10 bg-slate-900/40 p-6">
-      <form action={action} encType="multipart/form-data" className="space-y-4">
+      <form id={createFormId} action={action} className="space-y-4">
+        <ProductoCreateDraftPersist
+          formId={createFormId}
+          storageKey="admin:nuevo-producto:borrador"
+          enabled={mode === "create"}
+        />
         {mode === "edit" && product ? <input type="hidden" name="id" value={product.id} /> : null}
         {mode === "create" ? (
           <div className="rounded-lg border border-emerald-500/25 bg-emerald-950/20 px-3 py-2 text-sm text-emerald-100/90">
@@ -260,12 +267,23 @@ export async function ProductoEditor({
           />
           <p className="text-xs text-slate-500">JPG, PNG, WebP o GIF, hasta 5 MB por archivo.</p>
         </div>
-        <button
-          type="submit"
-          className="rounded-xl bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-rose-500"
-        >
-          {mode === "create" ? "Crear producto" : "Guardar cambios"}
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="submit"
+            className="rounded-xl bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-rose-500"
+          >
+            {mode === "create" ? "Crear producto" : "Guardar cambios"}
+          </button>
+          {mode === "create" ? (
+            <button
+              type="button"
+              data-clear-producto-draft={createFormId}
+              className="rounded-xl border border-white/15 bg-white/5 px-4 py-2.5 text-sm font-medium text-slate-200 hover:bg-white/10"
+            >
+              Limpiar borrador
+            </button>
+          ) : null}
+        </div>
       </form>
     </div>
   );

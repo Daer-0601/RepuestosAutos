@@ -1,4 +1,3 @@
-import { AdminButtonLink } from "@/app/admin/_components/admin-button-link";
 import { AdminPageShell } from "@/app/admin/_components/admin-page-shell";
 import { ProductosCatalogo } from "@/app/admin/productos/_components/productos-catalogo";
 import {
@@ -33,11 +32,7 @@ export default async function AdminProductosPage({
   const rowsConStock = mergeStocksEnFilas(rows, inv);
 
   return (
-    <AdminPageShell
-      title="Productos"
-      description="Catálogo con filtros, stock por sucursal y paginación. Proveedor y precio de compra se pueden enlazar cuando existan en el modelo."
-      actions={<AdminButtonLink href="/admin/productos/nueva">Nuevo producto</AdminButtonLink>}
-    >
+    <AdminPageShell>
       <ProductosCatalogo filtros={filtros} sucursales={sucursales} total={total} rows={rowsConStock} />
     </AdminPageShell>
   );

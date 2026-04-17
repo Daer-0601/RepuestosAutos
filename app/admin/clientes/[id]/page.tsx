@@ -25,7 +25,7 @@ export default async function EditarClientePage({ params, searchParams }: Props)
   const sp = await searchParams;
 
   return (
-    <AdminPageShell title={`Editar: ${c.nombre}`} error={sp.error}>
+    <AdminPageShell backHref="/admin/clientes" backLabel="Clientes" title={`Editar: ${c.nombre}`} error={sp.error}>
       <form
         action={updateClienteAction}
         className="max-w-xl space-y-4 rounded-2xl border border-white/10 bg-slate-900/40 p-6"

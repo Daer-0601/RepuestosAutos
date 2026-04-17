@@ -20,6 +20,8 @@ export default async function AdminTipoCambioPage({
 
   return (
     <AdminPageShell
+      backHref="/admin"
+      backLabel="Inicio admin"
       title="Tipo de cambio"
       description="Cada registro guarda el valor vigente a partir de su fecha. Los documentos guardan snapshot propio."
       error={sp.error}

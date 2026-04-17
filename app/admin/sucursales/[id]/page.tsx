@@ -31,6 +31,8 @@ export default async function EditarSucursalPage({ params, searchParams }: Props
 
   return (
     <AdminPageShell
+      backHref="/admin/sucursales"
+      backLabel="Sucursales"
       title={`Editar: ${s.nombre}`}
       description="Actualizá datos o desactivá la sucursal si ya no opera."
       error={sp.error}

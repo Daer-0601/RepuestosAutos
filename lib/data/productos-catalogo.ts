@@ -1,15 +1,17 @@
 import "server-only";
 
 import { pool } from "@/lib/db";
+import { condicionCodigoQrExacta } from "@/lib/data/producto-codigo-busqueda-exacta";
 import { sqlInt } from "@/lib/data/sql-utils";
 import type { RowDataPacket } from "mysql2";
 
 export type CatalogoFiltrosInput = {
-  /** Búsqueda amplia: tokens (espacio/coma); cada uno en cualquiera de código, nombre, pieza, texto, medida, etc. */
+  /** Búsqueda amplia: tokens; basta que uno coincida en nombre, pieza, descripción, etc. (no usa código interno). */
   q: string;
   codigo: string;
   codigo_pieza: string;
   especificacion: string;
+  medida: string;
   descripcion: string;
   procedencia: string;
   repuesto: string;
@@ -19,9 +21,14 @@ export type CatalogoFiltrosInput = {
   /** Solo productos con stock &gt; 0 en esta sucursal */
   sucursalStockId: number | null;
   estado: "" | "activo" | "inactivo";
-  page: number;
+  /** Filas por carga (por defecto 50 para que la página no sea lenta). */
   pageSize: number;
 };
+
+/** Por defecto al entrar a productos. */
+export const CATALOGO_FILAS_DEFAULT = 50;
+/** Máximo permitido en el selector «Filas». */
+export const CATALOGO_FILAS_MAX = 500;
 
 function parseImagenesGroupConcat(raw: string | null | undefined): string[] {
   if (raw == null || raw === "") return [];
@@ -48,8 +55,13 @@ export type ProductoCatalogoRow = {
   nombre: string;
   unidad: string | null;
   marca_auto: string | null;
+  /** Proveedor de la última compra confirmada del producto. */
+  proveedor_nombre: string | null;
   precio_venta_lista_bs: string | null;
   precio_venta_lista_usd: string | null;
+  /** Última línea de compra confirmada (unitario). */
+  precio_compra_unitario_bs: string | null;
+  precio_compra_unitario_usd: string | null;
   punto_tope: string | null;
   estado: string;
   stock_total: number;
@@ -61,12 +73,12 @@ export type InventarioStockCell = {
   stock: number;
 };
 
-/** Parte el texto en tokens (espacios, comas, punto y coma); sin comodines SQL. */
+/** Parte el texto en tokens (espacios, comas, punto y coma, guiones); sin comodines SQL. */
 function searchTokens(raw: string, maxTokens = 14): string[] {
   return raw
     .trim()
     .slice(0, 400)
-    .split(/[\s,;]+/)
+    .split(/[\s,;-]+/)
     .map((t) => t.replace(/%/g, "").trim())
     .filter((t) => t.length > 0)
     .map((t) => t.slice(0, 80))
@@ -78,9 +90,10 @@ function tokenLikeParam(t: string): string {
 }
 
 /**
- * Cada token debe aparecer en la misma columna (AND entre tokens), sin distinguir mayúsculas.
+ * Cualquier token alcanza (OR): más permisivo para texto libre.
+ * Cada token: LIKE case-insensitive en la misma columna.
  */
-function addFlexibleColumn(
+function addFlexibleColumnAnyToken(
   parts: string[],
   params: (string | number | null)[],
   colExpr: string,
@@ -88,20 +101,34 @@ function addFlexibleColumn(
 ): void {
   const tokens = searchTokens(raw);
   if (tokens.length === 0) return;
-  const inner = tokens.map(() => `LOWER(${colExpr}) LIKE ?`).join(" AND ");
+  const inner = tokens.map(() => `LOWER(${colExpr}) LIKE ?`).join(" OR ");
   parts.push(`(${inner})`);
   for (const tok of tokens) {
     params.push(tokenLikeParam(tok));
   }
 }
 
-/** Cada token debe coincidir en al menos uno de los campos (OR por campo, AND entre tokens). */
+/** Código interno / QR: solo coincidencia exacta (ver `condicionCodigoQrExacta`). */
+function addCodigoCatalogoFilter(
+  parts: string[],
+  params: (string | number | null)[],
+  raw: string
+): void {
+  const frag = condicionCodigoQrExacta(raw, "p");
+  if (!frag) return;
+  parts.push(frag.sql);
+  params.push(...frag.params);
+}
+
+/**
+ * Búsqueda amplia: cada token en cualquier campo; con varias palabras basta que **alguna** coincida
+ * (OR entre tokens). Sin código interno (solo el campo Código del formulario).
+ */
 function addFlexibleBusquedaAmplia(parts: string[], params: (string | number | null)[], raw: string): void {
   const tokens = searchTokens(raw);
   if (tokens.length === 0) return;
 
   const colExprs = [
-    "IFNULL(p.codigo,'')",
     "IFNULL(p.nombre,'')",
     "IFNULL(p.codigo_pieza,'')",
     "IFNULL(p.descripcion,'')",
@@ -112,9 +139,12 @@ function addFlexibleBusquedaAmplia(parts: string[], params: (string | number | n
     "IFNULL(p.marca_auto,'')",
   ];
 
-  for (const tok of tokens) {
+  const perToken = tokens.map(() => {
     const ors = colExprs.map((c) => `LOWER(${c}) LIKE ?`).join(" OR ");
-    parts.push(`(${ors})`);
+    return `(${ors})`;
+  });
+  parts.push(`(${perToken.join(" OR ")})`);
+  for (const tok of tokens) {
     for (let i = 0; i < colExprs.length; i++) {
       params.push(tokenLikeParam(tok));
     }
@@ -132,13 +162,14 @@ function buildWhere(f: CatalogoFiltrosInput): { sql: string; params: (string | n
 
   addFlexibleBusquedaAmplia(parts, params, f.q);
 
-  addFlexibleColumn(parts, params, "p.codigo", f.codigo);
-  addFlexibleColumn(parts, params, "IFNULL(p.codigo_pieza,'')", f.codigo_pieza);
-  addFlexibleColumn(parts, params, "IFNULL(p.especificacion,'')", f.especificacion);
-  addFlexibleColumn(parts, params, "IFNULL(p.descripcion,'')", f.descripcion);
-  addFlexibleColumn(parts, params, "IFNULL(p.procedencia,'')", f.procedencia);
-  addFlexibleColumn(parts, params, "IFNULL(p.repuesto,'')", f.repuesto);
-  addFlexibleColumn(parts, params, "IFNULL(p.marca_auto,'')", f.marca);
+  addCodigoCatalogoFilter(parts, params, f.codigo);
+  addFlexibleColumnAnyToken(parts, params, "IFNULL(p.codigo_pieza,'')", f.codigo_pieza);
+  addFlexibleColumnAnyToken(parts, params, "IFNULL(p.especificacion,'')", f.especificacion);
+  addFlexibleColumnAnyToken(parts, params, "IFNULL(p.medida,'')", f.medida);
+  addFlexibleColumnAnyToken(parts, params, "IFNULL(p.descripcion,'')", f.descripcion);
+  addFlexibleColumnAnyToken(parts, params, "IFNULL(p.procedencia,'')", f.procedencia);
+  addFlexibleColumnAnyToken(parts, params, "IFNULL(p.repuesto,'')", f.repuesto);
+  addFlexibleColumnAnyToken(parts, params, "IFNULL(p.marca_auto,'')", f.marca);
 
   if (f.stock === "cero") {
     parts.push(
@@ -172,21 +203,39 @@ export async function countProductosCatalogo(f: CatalogoFiltrosInput): Promise<n
 
 export async function listProductosCatalogo(f: CatalogoFiltrosInput): Promise<ProductoCatalogoRow[]> {
   const { sql, params } = buildWhere(f);
-  const lim = sqlInt(f.pageSize, 500);
-  const page = Math.max(1, Math.trunc(f.page) || 1);
-  const offset = (page - 1) * lim;
+  const lim = sqlInt(f.pageSize, CATALOGO_FILAS_MAX);
 
   const [rows] = await pool.execute<RowDataPacket[]>(
     `SELECT p.id, p.codigo, p.qr_payload, p.codigo_pieza, p.especificacion, p.descripcion, p.repuesto, p.procedencia,
-            p.medida, p.nombre, p.unidad, p.marca_auto, p.precio_venta_lista_bs, p.precio_venta_lista_usd,
+            p.medida, p.nombre, p.unidad, p.marca_auto,
+            (SELECT pr.nombre
+             FROM compra_detalle cd
+             INNER JOIN compras c ON c.id = cd.compra_id AND c.estado = 'confirmada'
+             INNER JOIN proveedores pr ON pr.id = c.proveedor_id
+             WHERE cd.producto_id = p.id
+             ORDER BY c.fecha DESC, cd.id DESC
+             LIMIT 1) AS proveedor_nombre,
+            p.precio_venta_lista_bs, p.precio_venta_lista_usd,
             p.punto_tope, p.estado,
+            (SELECT cd.precio_compra_unitario_bs
+             FROM compra_detalle cd
+             INNER JOIN compras c ON c.id = cd.compra_id AND c.estado = 'confirmada'
+             WHERE cd.producto_id = p.id
+             ORDER BY c.fecha DESC, cd.id DESC
+             LIMIT 1) AS precio_compra_unitario_bs,
+            (SELECT cd.precio_compra_unitario_usd
+             FROM compra_detalle cd
+             INNER JOIN compras c ON c.id = cd.compra_id AND c.estado = 'confirmada'
+             WHERE cd.producto_id = p.id
+             ORDER BY c.fecha DESC, cd.id DESC
+             LIMIT 1) AS precio_compra_unitario_usd,
             COALESCE((SELECT SUM(i.stock) FROM inventario i WHERE i.producto_id = p.id), 0) AS stock_total,
             (SELECT GROUP_CONCAT(pi.url_imagen ORDER BY pi.orden ASC, pi.id ASC SEPARATOR '\t')
                FROM producto_imagenes pi WHERE pi.producto_id = p.id) AS imagenes_concat
      FROM productos p
      ${sql}
      ORDER BY p.id DESC
-     LIMIT ${lim} OFFSET ${offset}`,
+     LIMIT ${lim} OFFSET 0`,
     params
   );
   return (rows as (ProductoCatalogoRow & { imagenes_concat?: string | null })[]).map(
@@ -241,6 +290,7 @@ export function stringifyCatalogoFiltros(
   if (m.codigo.trim()) p.set("codigo", m.codigo.trim());
   if (m.codigo_pieza.trim()) p.set("codigo_pieza", m.codigo_pieza.trim());
   if (m.especificacion.trim()) p.set("especificacion", m.especificacion.trim());
+  if (m.medida.trim()) p.set("medida", m.medida.trim());
   if (m.descripcion.trim()) p.set("descripcion", m.descripcion.trim());
   if (m.procedencia.trim()) p.set("procedencia", m.procedencia.trim());
   if (m.repuesto.trim()) p.set("repuesto", m.repuesto.trim());
@@ -249,8 +299,7 @@ export function stringifyCatalogoFiltros(
   if (m.sucursalStockId != null) p.set("sucursal", String(m.sucursalStockId));
   if (m.estado === "") p.set("estado", "todos");
   else if (m.estado === "inactivo") p.set("estado", "inactivo");
-  if (m.pageSize !== 10) p.set("perPage", String(m.pageSize));
-  if (m.page > 1) p.set("page", String(m.page));
+  if (m.pageSize !== CATALOGO_FILAS_DEFAULT) p.set("perPage", String(m.pageSize));
   const s = p.toString();
   return s ? `?${s}` : "";
 }
@@ -274,15 +323,16 @@ export function parseCatalogoFiltros(sp: Record<string, string | string[] | unde
   const sucRaw = Number(s("sucursal"));
   const sucursalStockId = Number.isFinite(sucRaw) && sucRaw > 0 ? sucRaw : null;
 
-  const page = Math.max(1, Number(s("page")) || 1);
   const perRaw = Number(s("perPage"));
-  const pageSize = Number.isFinite(perRaw) && perRaw >= 10 ? sqlInt(perRaw, 500) : 10;
+  const pageSize =
+    Number.isFinite(perRaw) && perRaw >= 10 ? sqlInt(perRaw, CATALOGO_FILAS_MAX) : CATALOGO_FILAS_DEFAULT;
 
   return {
     q: s("q"),
     codigo: s("codigo"),
     codigo_pieza: s("codigo_pieza"),
     especificacion: s("especificacion"),
+    medida: s("medida"),
     descripcion: s("descripcion"),
     procedencia: s("procedencia"),
     repuesto: s("repuesto"),
@@ -290,7 +340,6 @@ export function parseCatalogoFiltros(sp: Record<string, string | string[] | unde
     stock,
     sucursalStockId,
     estado,
-    page,
     pageSize,
   };
 }

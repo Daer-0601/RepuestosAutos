@@ -41,3 +41,27 @@ export async function getProveedorActivo(id: number): Promise<ProveedorRow | nul
   const r = rows[0] as ProveedorRow | undefined;
   return r ?? null;
 }
+
+export async function getProveedorActivoPorNombre(nombre: string): Promise<ProveedorRow | null> {
+  const n = nombre.trim();
+  if (!n) return null;
+  const [rows] = await pool.execute<RowDataPacket[]>(
+    `SELECT id, nombre, telefono, direccion, activo
+     FROM proveedores
+     WHERE activo = 1 AND LOWER(TRIM(nombre)) = LOWER(TRIM(?))
+     ORDER BY id ASC
+     LIMIT 1`,
+    [n]
+  );
+  const r = rows[0] as ProveedorRow | undefined;
+  return r ?? null;
+}
+
+export async function ensureProveedorActivoPorNombre(nombre: string): Promise<ProveedorRow | null> {
+  const n = nombre.trim();
+  if (!n) return null;
+  const existing = await getProveedorActivoPorNombre(n);
+  if (existing) return existing;
+  const id = await insertProveedor({ nombre: n, telefono: null, direccion: null });
+  return getProveedorActivo(id);
+}

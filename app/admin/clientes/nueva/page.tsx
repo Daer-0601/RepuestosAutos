@@ -17,7 +17,7 @@ export default async function NuevoClientePage({
   const sp = await searchParams;
 
   return (
-    <AdminPageShell title="Nuevo cliente" error={sp.error}>
+    <AdminPageShell backHref="/admin/clientes" backLabel="Clientes" title="Nuevo cliente" error={sp.error}>
       <form
         action={createClienteAction}
         className="max-w-xl space-y-4 rounded-2xl border border-white/10 bg-slate-900/40 p-6"

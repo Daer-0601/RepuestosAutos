@@ -18,6 +18,8 @@ export default async function NuevaSucursalPage({
 
   return (
     <AdminPageShell
+      backHref="/admin/sucursales"
+      backLabel="Sucursales"
       title="Nueva sucursal"
       description="Datos de contacto y estado operativo."
       error={sp.error}

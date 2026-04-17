@@ -8,12 +8,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 const COL_MIN = 40;
 const cellPad = "px-2 py-1.5";
+/** Líneas verticales entre columnas (color distinto al fondo). */
+const cellBorderR = "border-r border-sky-500/35";
 
 function defaultColWidths(sucCount: number): number[] {
-  const base = [88, 72, 112, 88, 220, 72, 72, 72, 88, 56, 120, 72, 88, 88, 56];
-  /* Columnas sucursal: ancho para nombre completo (se puede estirar después). */
+  /* … P. venta Bs, luego sucursales, stock total, P. tope, acción */
+  const baseCore = [88, 72, 112, 88, 120, 220, 72, 72, 72, 88, 56, 72, 88, 88];
   const suc = Array.from({ length: sucCount }, () => 128);
-  return [...base, ...suc, 80, 72];
+  return [...baseCore, ...suc, 56, 80, 72];
 }
 
 function filaPorStock(stockTotal: number): { tr: string; mono: string } {
@@ -56,20 +58,19 @@ export function ProductosCatalogoTabla({
       "Código",
       "Cód. pieza",
       "Especificación",
+      "Medida",
       "Descripción",
       "Repuesto",
       "Proced.",
       "Proveedor",
       "Marca",
       "Unidad",
-      "Medida",
       "P. compra",
-      "P. venta Bs",
       "P. venta USD",
-      "Stock",
+      "P. venta Bs",
     ];
     const suc = sucursales.map((s) => s.nombre);
-    return [...base, ...suc, "P. tope", "Acción"];
+    return [...base, ...suc, "Stock", "P. tope", "Acción"];
   }, [sucursales]);
 
   const onColumnResizeMove = useCallback((e: MouseEvent) => {
@@ -110,15 +111,35 @@ export function ProductosCatalogoTabla({
     [colWidths, onColumnResizeMove, onColumnResizeEnd]
   );
 
+  /** Borde derecho de la columna: usable en cabecera y en cualquier fila. */
+  const resizeHandle = useCallback(
+    (colIndex: number, label: string) => (
+      <span
+        className="absolute right-0 top-0 z-20 h-full w-4 min-w-[14px] max-w-[18px] cursor-col-resize hover:bg-sky-500/30 active:bg-sky-500/40"
+        style={{ transform: "translateX(50%)" }}
+        onMouseDown={(e) => beginColumnResize(e, colIndex)}
+        onClick={(e) => e.stopPropagation()}
+        role="separator"
+        aria-orientation="vertical"
+        aria-label={`Redimensionar columna ${label || colIndex}`}
+      />
+    ),
+    [beginColumnResize]
+  );
+
   const nSuc = sucursales.length;
   const colSpan = 17 + nSuc;
-  const idxSucStart = 15;
+  /** Primera columna de stock por sucursal (después de P. venta Bs). */
+  const idxSucStart = 14;
+  /** Stock total general, después de todas las sucursales. */
+  const idxStockTotal = 14 + nSuc;
+  const idxPtope = idxStockTotal + 1;
   const idxAccion = labels.length - 1;
 
   return (
     <div className="max-h-[min(75dvh,720px)] overflow-y-auto overflow-x-auto rounded-2xl border border-white/10 bg-slate-900/40 overscroll-contain">
       <table
-        className="table-fixed border-collapse text-left text-xs"
+        className="table-fixed border-collapse border border-sky-500/30 text-left text-xs"
         style={{ width: tablaAnchoPx, minWidth: tablaAnchoPx }}
       >
         <colgroup>
@@ -126,19 +147,19 @@ export function ProductosCatalogoTabla({
             <col key={i} style={{ width: w }} />
           ))}
         </colgroup>
-        <thead className="sticky top-0 z-[1] border-b border-white/10 bg-slate-950/95 text-[10px] font-semibold uppercase tracking-wide text-slate-500 shadow-sm shadow-black/20">
+        <thead className="sticky top-0 z-[1] border-b-2 border-sky-500/45 bg-slate-950/95 text-[10px] font-semibold uppercase tracking-wide text-slate-500 shadow-sm shadow-black/20">
           <tr>
             {labels.map((label, i) => {
               const isSuc = i >= idxSucStart && i < idxSucStart + nSuc;
               const isAccion = i === idxAccion;
               const sucursalCol = isSuc ? sucursales[i - idxSucStart] : null;
               const thTitle = isSuc
-                ? `${sucursalCol?.nombre ?? label} · arrastrá el borde derecho para ancho`
-                : "Arrastrá el borde derecho para cambiar el ancho";
+                ? `${sucursalCol?.nombre ?? label} · arrastrá el borde derecho (aquí o en la tabla)`
+                : "Arrastrá el borde derecho de la columna (encabezado o celdas)";
               return (
                 <th
                   key={isSuc && sucursalCol ? `suc-${sucursalCol.id}` : `col-${i}`}
-                  className={`${cellPad} relative select-none ${isSuc || i === 14 ? "text-center" : ""} ${isAccion ? "text-right" : ""} ${isSuc ? "align-bottom font-medium normal-case text-slate-300" : ""}`}
+                  className={`${cellPad} ${cellBorderR} relative select-none ${isSuc || i === idxStockTotal ? "text-center" : ""} ${isAccion ? "text-right" : ""} ${isSuc ? "align-bottom font-medium normal-case text-slate-300" : ""}`}
                   title={thTitle}
                 >
                   <span
@@ -152,20 +173,13 @@ export function ProductosCatalogoTabla({
                   >
                     {i === 0 ? "Ver QR e imágenes" : label}
                   </span>
-                  <span
-                    className="absolute right-0 top-0 z-10 h-full w-3 max-w-[12px] cursor-col-resize hover:bg-sky-500/25"
-                    style={{ transform: "translateX(50%)" }}
-                    onMouseDown={(e) => beginColumnResize(e, i)}
-                    role="separator"
-                    aria-orientation="vertical"
-                    aria-label={`Redimensionar columna ${label}`}
-                  />
+                  {resizeHandle(i, label)}
                 </th>
               );
             })}
           </tr>
         </thead>
-        <tbody className="divide-y divide-white/5">
+        <tbody className="divide-y divide-sky-500/30">
           {rows.length === 0 ? (
             <tr>
               <td colSpan={colSpan} className="px-4 py-10 text-center text-slate-500">
@@ -202,44 +216,95 @@ export function ProductosCatalogoTabla({
                       : ""
                   }`}
                 >
-                  <td className={`${cellPad} whitespace-nowrap`}>
+                  <td className={`${cellPad} ${cellBorderR} relative whitespace-nowrap`}>
                     <ProductoQrImagenesControls
                       codigo={r.codigo}
                       qrPayload={r.qr_payload}
                       imagenesUrls={r.imagenes_urls}
                       onOpenInteraction={(e) => e.stopPropagation()}
                     />
+                    {resizeHandle(0, labels[0] || "QR")}
                   </td>
-                  <td className={`${cellPad} truncate font-mono ${tone.mono}`}>{r.codigo}</td>
-                  <td className={`${cellPad} truncate font-mono ${tone.mono}`}>{r.codigo_pieza ?? "—"}</td>
-                  <td className={`${cellPad} truncate`}>{r.especificacion ?? "—"}</td>
-                  <td className={`${cellPad} truncate font-medium`} title={r.descripcion ?? ""}>
-                    {r.descripcion ?? r.nombre}
+                  <td className={`${cellPad} ${cellBorderR} relative truncate font-mono ${tone.mono}`}>
+                    {r.codigo}
+                    {resizeHandle(1, labels[1])}
                   </td>
-                  <td className={`${cellPad} truncate`}>{r.repuesto ?? "—"}</td>
-                  <td className={`${cellPad} truncate`}>{r.procedencia ?? "—"}</td>
-                  <td className={`${cellPad} truncate opacity-80`}>—</td>
-                  <td className={`${cellPad} truncate`}>{r.marca_auto ?? "—"}</td>
-                  <td className={`${cellPad} truncate`}>{r.unidad ?? "—"}</td>
-                  <td className={`${cellPad} truncate text-[11px] font-mono ${tone.mono}`} title={r.medida ?? ""}>
+                  <td className={`${cellPad} ${cellBorderR} relative truncate font-mono ${tone.mono}`}>
+                    {r.codigo_pieza ?? "—"}
+                    {resizeHandle(2, labels[2])}
+                  </td>
+                  <td className={`${cellPad} ${cellBorderR} relative truncate`}>
+                    {r.especificacion ?? "—"}
+                    {resizeHandle(3, labels[3])}
+                  </td>
+                  <td className={`${cellPad} ${cellBorderR} relative truncate text-[11px] font-mono ${tone.mono}`} title={r.medida ?? ""}>
                     {r.medida ?? "—"}
+                    {resizeHandle(4, labels[4])}
                   </td>
-                  <td className={`${cellPad} truncate opacity-80`}>—</td>
-                  <td className={`${cellPad} truncate font-mono ${tone.mono}`}>{r.precio_venta_lista_bs ?? "—"}</td>
-                  <td className={`${cellPad} truncate font-mono ${tone.mono}`}>{r.precio_venta_lista_usd ?? "—"}</td>
-                  <td className={`${cellPad} truncate text-center font-semibold font-mono ${tone.mono}`}>
-                    {r.stock_total}
+                  <td className={`${cellPad} ${cellBorderR} relative truncate font-medium`} title={r.descripcion ?? ""}>
+                    {r.descripcion ?? r.nombre}
+                    {resizeHandle(5, labels[5])}
                   </td>
-                  {sucursales.map((s) => {
+                  <td className={`${cellPad} ${cellBorderR} relative truncate`}>
+                    {r.repuesto ?? "—"}
+                    {resizeHandle(6, labels[6])}
+                  </td>
+                  <td className={`${cellPad} ${cellBorderR} relative truncate`}>
+                    {r.procedencia ?? "—"}
+                    {resizeHandle(7, labels[7])}
+                  </td>
+                  <td className={`${cellPad} ${cellBorderR} relative truncate opacity-80`}>
+                    {r.proveedor_nombre ?? "—"}
+                    {resizeHandle(8, labels[8])}
+                  </td>
+                  <td className={`${cellPad} ${cellBorderR} relative truncate`}>
+                    {r.marca_auto ?? "—"}
+                    {resizeHandle(9, labels[9])}
+                  </td>
+                  <td className={`${cellPad} ${cellBorderR} relative truncate`}>
+                    {r.unidad ?? "—"}
+                    {resizeHandle(10, labels[10])}
+                  </td>
+                  <td
+                    className={`${cellPad} ${cellBorderR} relative truncate font-mono ${tone.mono}`}
+                    title={
+                      r.precio_compra_unitario_usd
+                        ? `Última compra · USD unit.: ${r.precio_compra_unitario_usd}`
+                        : r.precio_compra_unitario_bs
+                          ? "Última compra confirmada (unitario Bs)"
+                          : undefined
+                    }
+                  >
+                    {r.precio_compra_unitario_bs ?? "—"}
+                    {resizeHandle(11, labels[11])}
+                  </td>
+                  <td className={`${cellPad} ${cellBorderR} relative truncate font-mono ${tone.mono}`}>
+                    {r.precio_venta_lista_usd ?? "—"}
+                    {resizeHandle(12, labels[12])}
+                  </td>
+                  <td className={`${cellPad} ${cellBorderR} relative truncate font-mono ${tone.mono}`}>
+                    {r.precio_venta_lista_bs ?? "—"}
+                    {resizeHandle(13, labels[13])}
+                  </td>
+                  {sucursales.map((s, si) => {
                     const q = r.stocksPorSucursal.get(s.id) ?? 0;
+                    const colI = idxSucStart + si;
                     return (
-                      <td key={s.id} className={`${cellPad} text-center font-mono ${tone.mono}`}>
+                      <td key={s.id} className={`${cellPad} ${cellBorderR} relative text-center font-mono ${tone.mono}`}>
                         {q}
+                        {resizeHandle(colI, labels[colI] ?? s.nombre)}
                       </td>
                     );
                   })}
-                  <td className={`${cellPad} truncate font-mono ${tone.mono}`}>{r.punto_tope ?? "—"}</td>
-                  <td className={`${cellPad} text-right`}>
+                  <td className={`${cellPad} ${cellBorderR} relative truncate text-center font-semibold font-mono ${tone.mono}`}>
+                    {r.stock_total}
+                    {resizeHandle(idxStockTotal, labels[idxStockTotal])}
+                  </td>
+                  <td className={`${cellPad} ${cellBorderR} relative truncate font-mono ${tone.mono}`}>
+                    {r.punto_tope ?? "—"}
+                    {resizeHandle(idxPtope, labels[idxPtope])}
+                  </td>
+                  <td className={`${cellPad} ${cellBorderR} relative text-right`}>
                     <Link
                       href={`/admin/productos/${r.id}`}
                       className="font-medium text-sky-300 hover:text-sky-200 hover:underline"
@@ -247,6 +312,7 @@ export function ProductosCatalogoTabla({
                     >
                       Editar
                     </Link>
+                    {resizeHandle(idxAccion, labels[idxAccion])}
                   </td>
                 </tr>
               );

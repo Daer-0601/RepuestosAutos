@@ -1,3 +1,4 @@
+import { AdminButtonLink } from "@/app/admin/_components/admin-button-link";
 import { ProductosCatalogoTabla } from "@/app/admin/productos/_components/productos-catalogo-tabla";
 import type { SucursalRow } from "@/lib/data/sucursales";
 import {
@@ -21,54 +22,96 @@ export function ProductosCatalogo({
   total: number;
   rows: ProductoCatalogoRowConStock[];
 }) {
-  const desde = total === 0 ? 0 : (filtros.page - 1) * filtros.pageSize + 1;
-  const hasta = Math.min(filtros.page * filtros.pageSize, total);
-  const totalPaginas = Math.max(1, Math.ceil(total / filtros.pageSize));
-
   return (
     <div className="space-y-4">
       <form method="get" className="rounded-2xl border border-white/10 bg-slate-900/50 p-4">
-        <input type="hidden" name="page" value="1" />
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5">
           <div className="lg:col-span-2">
             <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Buscar (todo)</label>
             <input
               name="q"
               defaultValue={filtros.q}
-              placeholder="Varias palabras o fragmentos; orden libre…"
+              placeholder="Palabras sueltas; basta con que una coincida…"
               className={`${inp} mt-1`}
             />
             <p className="mt-1 text-[10px] text-slate-500">
-              Separa con espacio o coma. No hace falta el texto exacto ni las mayúsculas.
+              Espacio, coma o guion. Sin mayúsculas. No busca el código interno del producto.
             </p>
           </div>
           <div>
             <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Código</label>
-            <input name="codigo" defaultValue={filtros.codigo} placeholder="Buscar por código" className={`${inp} mt-1`} />
+            <input
+              name="codigo"
+              defaultValue={filtros.codigo}
+              placeholder="Ej. 1000 o 001000 (exacto)"
+              className={`${inp} mt-1`}
+            />
+            <p className="mt-1 text-[10px] text-slate-500">
+              Solo el producto con ese código o QR; si es número, también coincide sin ceros a la izquierda.
+            </p>
           </div>
           <div>
             <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Código pieza</label>
-            <input name="codigo_pieza" defaultValue={filtros.codigo_pieza} className={`${inp} mt-1`} />
+            <input
+              name="codigo_pieza"
+              defaultValue={filtros.codigo_pieza}
+              placeholder="Cualquier palabra alcanza"
+              className={`${inp} mt-1`}
+            />
           </div>
           <div>
             <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Especificación</label>
-            <input name="especificacion" defaultValue={filtros.especificacion} className={`${inp} mt-1`} />
+            <input
+              name="especificacion"
+              defaultValue={filtros.especificacion}
+              placeholder="Cualquier palabra alcanza"
+              className={`${inp} mt-1`}
+            />
+          </div>
+          <div>
+            <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Medida</label>
+            <input
+              name="medida"
+              defaultValue={filtros.medida}
+              placeholder="Cualquier palabra alcanza"
+              className={`${inp} mt-1`}
+            />
           </div>
           <div>
             <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Descripción</label>
-            <input name="descripcion" defaultValue={filtros.descripcion} className={`${inp} mt-1`} />
+            <input
+              name="descripcion"
+              defaultValue={filtros.descripcion}
+              placeholder="Cualquier palabra alcanza"
+              className={`${inp} mt-1`}
+            />
           </div>
           <div>
             <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Procedencia</label>
-            <input name="procedencia" defaultValue={filtros.procedencia} className={`${inp} mt-1`} />
+            <input
+              name="procedencia"
+              defaultValue={filtros.procedencia}
+              placeholder="Cualquier palabra alcanza"
+              className={`${inp} mt-1`}
+            />
           </div>
           <div>
             <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Repuesto / tipo</label>
-            <input name="repuesto" defaultValue={filtros.repuesto} className={`${inp} mt-1`} />
+            <input
+              name="repuesto"
+              defaultValue={filtros.repuesto}
+              placeholder="Cualquier palabra alcanza"
+              className={`${inp} mt-1`}
+            />
           </div>
           <div>
             <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Marca auto</label>
-            <input name="marca" defaultValue={filtros.marca} className={`${inp} mt-1`} />
+            <input
+              name="marca"
+              defaultValue={filtros.marca}
+              placeholder="Cualquier palabra alcanza"
+              className={`${inp} mt-1`}
+            />
           </div>
           <div>
             <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Stock total</label>
@@ -90,16 +133,6 @@ export function ProductosCatalogo({
               <option value="todos">Todos</option>
             </select>
           </div>
-          <div>
-            <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Mostrar</label>
-            <select name="perPage" defaultValue={String(filtros.pageSize)} className={`${inp} mt-1`}>
-              {[10, 25, 50, 100, 200, 500].map((n) => (
-                <option key={n} value={n}>
-                  {n} registros
-                </option>
-              ))}
-            </select>
-          </div>
         </div>
 
         <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-white/5 pt-4">
@@ -107,7 +140,7 @@ export function ProductosCatalogo({
           {sucursales.map((s) => (
             <Link
               key={s.id}
-              href={`/admin/productos${stringifyCatalogoFiltros(filtros, { sucursalStockId: s.id, page: 1 })}`}
+              href={`/admin/productos${stringifyCatalogoFiltros(filtros, { sucursalStockId: s.id })}`}
               className={`rounded-lg border px-2.5 py-1 text-xs font-medium transition ${
                 filtros.sucursalStockId === s.id
                   ? "border-sky-500/60 bg-sky-600/30 text-sky-100"
@@ -119,7 +152,7 @@ export function ProductosCatalogo({
           ))}
           {filtros.sucursalStockId != null ? (
             <Link
-              href={`/admin/productos${stringifyCatalogoFiltros(filtros, { sucursalStockId: null, page: 1 })}`}
+              href={`/admin/productos${stringifyCatalogoFiltros(filtros, { sucursalStockId: null })}`}
               className="rounded-lg border border-white/10 px-2.5 py-1 text-xs text-slate-400 hover:text-white"
             >
               Quitar filtro sucursal
@@ -127,46 +160,32 @@ export function ProductosCatalogo({
           ) : null}
         </div>
 
-        <div className="mt-4 flex flex-wrap gap-2">
-          <button
-            type="submit"
-            className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-500"
-          >
-            Buscar
-          </button>
-          <Link
-            href="/admin/productos"
-            className="rounded-lg border border-white/15 px-4 py-2 text-sm font-medium text-slate-300 hover:bg-white/5"
-          >
-            Limpiar
-          </Link>
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="submit"
+              className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-500"
+            >
+              Buscar
+            </button>
+            <Link
+              href="/admin/productos"
+              className="rounded-lg border border-white/15 px-4 py-2 text-sm font-medium text-slate-300 hover:bg-white/5"
+            >
+              Limpiar
+            </Link>
+          </div>
+          <AdminButtonLink href="/admin/productos/nueva">Nuevo producto</AdminButtonLink>
         </div>
       </form>
 
-      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
-        <p>
-          {desde === 0 ? "Sin resultados" : `${desde}–${hasta} de ${total} registros`}
-          {totalPaginas > 1 ? ` · página ${filtros.page} de ${totalPaginas}` : null}
-        </p>
-        <div className="flex flex-wrap gap-1">
-          {filtros.page > 1 ? (
-            <Link
-              href={`/admin/productos${stringifyCatalogoFiltros(filtros, { page: filtros.page - 1 })}`}
-              className="rounded border border-white/10 px-2 py-1 text-slate-300 hover:bg-white/5"
-            >
-              Anterior
-            </Link>
-          ) : null}
-          {filtros.page < totalPaginas ? (
-            <Link
-              href={`/admin/productos${stringifyCatalogoFiltros(filtros, { page: filtros.page + 1 })}`}
-              className="rounded border border-white/10 px-2 py-1 text-slate-300 hover:bg-white/5"
-            >
-              Siguiente
-            </Link>
-          ) : null}
-        </div>
-      </div>
+      <p className="text-xs text-slate-500">
+        {total === 0
+          ? "Sin resultados con estos filtros."
+          : rows.length < total
+            ? `Mostrando ${rows.length} de ${total} producto(s) (máx. ${filtros.pageSize} por carga; refiná filtros para ver el resto).`
+            : `Mostrando ${rows.length} producto(s) · desplazá con la barra de la tabla.`}
+      </p>
 
       <ProductosCatalogoTabla rows={rows} sucursales={sucursales} />
     </div>

@@ -1,6 +1,7 @@
 "use server";
 
 import { getAdminSession } from "@/lib/auth/admin-session";
+import { refreshPrecioVentaBsDesdeTipoCambio } from "@/lib/data/productos";
 import * as repo from "@/lib/data/tipo-cambio";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
@@ -26,6 +27,8 @@ export async function createTipoCambioAction(formData: FormData) {
     usuario_id: admin.userId,
     nota,
   });
+  await refreshPrecioVentaBsDesdeTipoCambio(valor);
   revalidatePath("/admin/tipo-cambio");
+  revalidatePath("/admin/productos");
   redirect("/admin/tipo-cambio");
 }

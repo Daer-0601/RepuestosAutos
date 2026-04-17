@@ -1,6 +1,15 @@
 import "server-only";
 
 import { pool } from "@/lib/db";
+import { condicionCodigoQrExacta } from "@/lib/data/producto-codigo-busqueda-exacta";
+
+/** Quita `.` usado como separador de miles (ej. `1.000` → `1000`). */
+function normalizarCodigoQrProducto(codigo: string, qr_payload: string) {
+  return {
+    codigo: codigo.replace(/\./g, ""),
+    qr_payload: qr_payload.replace(/\./g, ""),
+  };
+}
 import { sqlInt } from "@/lib/data/sql-utils";
 import type { PoolConnection } from "mysql2/promise";
 import type { RowDataPacket, ResultSetHeader } from "mysql2";
@@ -74,15 +83,20 @@ export async function searchProductosParaIngreso(
     return rows as ProductoBusquedaIngresoRow[];
   }
 
+  const frag = condicionCodigoQrExacta(q, "p");
+  if (!frag) {
+    return [];
+  }
+  const likeNombre = `%${q.toLowerCase()}%`;
   const [rows] = await pool.query<RowDataPacket[]>(
     `SELECT id, codigo, codigo_pieza, nombre, qr_payload, medida, especificacion, descripcion,
             precio_venta_lista_bs, precio_venta_lista_usd, porcentaje_utilidad, punto_tope
-     FROM productos
+     FROM productos p
      WHERE estado = 'activo'
-       AND (codigo LIKE ? OR nombre LIKE ?)
-     ORDER BY (codigo = ?) DESC, LENGTH(codigo) ASC, nombre ASC, codigo ASC
+       AND (${frag.sql} OR LOWER(p.nombre) LIKE ?)
+     ORDER BY (p.codigo = ?) DESC, (IFNULL(p.qr_payload,'') = ?) DESC, LENGTH(p.codigo) ASC, p.nombre ASC, p.codigo ASC
      LIMIT ${lim}`,
-    [like, like, q]
+    [...frag.params, likeNombre, q, q]
   );
   return rows as ProductoBusquedaIngresoRow[];
 }
@@ -120,11 +134,12 @@ export async function getProducto(id: number): Promise<ProductoFullRow | null> {
 }
 
 export async function countProductoCodigo(codigo: string, excludeId?: number): Promise<number> {
+  const { codigo: codigoNorm } = normalizarCodigoQrProducto(codigo, codigo);
   const [rows] = await pool.execute<RowDataPacket[]>(
     excludeId
       ? `SELECT COUNT(*) AS c FROM productos WHERE codigo = ? AND id <> ?`
       : `SELECT COUNT(*) AS c FROM productos WHERE codigo = ?`,
-    excludeId ? [codigo, excludeId] : [codigo]
+    excludeId ? [codigoNorm, excludeId] : [codigoNorm]
   );
   return Number((rows[0] as { c: number }).c);
 }
@@ -133,11 +148,12 @@ export async function countProductoQrPayload(
   qr_payload: string,
   excludeId?: number
 ): Promise<number> {
+  const { qr_payload: qrPayloadNorm } = normalizarCodigoQrProducto(qr_payload, qr_payload);
   const [rows] = await pool.execute<RowDataPacket[]>(
     excludeId
       ? `SELECT COUNT(*) AS c FROM productos WHERE qr_payload = ? AND id <> ?`
       : `SELECT COUNT(*) AS c FROM productos WHERE qr_payload = ?`,
-    excludeId ? [qr_payload, excludeId] : [qr_payload]
+    excludeId ? [qrPayloadNorm, excludeId] : [qrPayloadNorm]
   );
   return Number((rows[0] as { c: number }).c);
 }
@@ -167,6 +183,7 @@ export async function insertProductoWithConnection(
   conn: PoolConnection,
   input: ProductoInsertInput
 ): Promise<number> {
+  const { codigo, qr_payload } = normalizarCodigoQrProducto(input.codigo, input.qr_payload);
   const [res] = await conn.execute<ResultSetHeader>(
     `INSERT INTO productos (
       codigo, qr_payload, codigo_pieza, nombre, especificacion, repuesto, procedencia, medida,
@@ -174,8 +191,8 @@ export async function insertProductoWithConnection(
       porcentaje_utilidad, punto_tope, estado
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
-      input.codigo,
-      input.qr_payload,
+      codigo,
+      qr_payload,
       input.codigo_pieza,
       input.nombre,
       input.especificacion,
@@ -214,15 +231,44 @@ export async function insertProductoConCodigoSecuencial(
     }
     try {
       const [rows] = await conn.query<RowDataPacket[]>(
-        `SELECT COALESCE(
+        `SELECT GREATEST(
+           COALESCE(
+             (SELECT MAX(CAST(p.codigo AS UNSIGNED))
+              FROM productos p
+              WHERE p.codigo REGEXP '^[0-9]+$'),
+             0
+           ) + 1,
+           COALESCE(
            (SELECT t.AUTO_INCREMENT FROM information_schema.TABLES t
             WHERE t.TABLE_SCHEMA = DATABASE() AND t.TABLE_NAME = 'productos' LIMIT 1),
            (SELECT COALESCE(MAX(p.id), 0) + 1 FROM productos p)
+           )
          ) AS n`
       );
-      const n = Number((rows[0] as { n: number | bigint | null }).n);
-      const codigo = String(n).padStart(6, "0");
-      const qr_payload = codigo;
+      let n = Number((rows[0] as { n: number | bigint | null }).n);
+      if (!Number.isFinite(n) || n < 1) {
+        n = 1;
+      }
+
+      let codigo = "";
+      let qr_payload = "";
+      let found = false;
+      for (let i = 0; i < 20000; i++) {
+        codigo = String(n).padStart(6, "0");
+        qr_payload = codigo;
+        const [dupeRows] = await conn.query<RowDataPacket[]>(
+          `SELECT 1 FROM productos WHERE codigo = ? OR qr_payload = ? LIMIT 1`,
+          [codigo, qr_payload]
+        );
+        if ((dupeRows as RowDataPacket[]).length === 0) {
+          found = true;
+          break;
+        }
+        n += 1;
+      }
+      if (!found) {
+        throw new Error("No se pudo generar un código de producto único.");
+      }
       const id = await insertProductoWithConnection(conn, {
         ...input,
         codigo,
@@ -276,6 +322,7 @@ export type ProductoUpdateInput = {
 };
 
 export async function updateProducto(id: number, input: ProductoUpdateInput): Promise<void> {
+  const { codigo, qr_payload } = normalizarCodigoQrProducto(input.codigo, input.qr_payload);
   await pool.execute(
     `UPDATE productos SET
       codigo = ?, qr_payload = ?, codigo_pieza = ?, nombre = ?, especificacion = ?, repuesto = ?,
@@ -283,8 +330,8 @@ export async function updateProducto(id: number, input: ProductoUpdateInput): Pr
       precio_venta_lista_bs = ?, precio_venta_lista_usd = ?, porcentaje_utilidad = ?, punto_tope = ?, estado = ?
      WHERE id = ?`,
     [
-      input.codigo,
-      input.qr_payload,
+      codigo,
+      qr_payload,
       input.codigo_pieza,
       input.nombre,
       input.especificacion,
@@ -309,6 +356,7 @@ export async function updateProductoWithConnection(
   id: number,
   input: ProductoUpdateInput
 ): Promise<void> {
+  const { codigo, qr_payload } = normalizarCodigoQrProducto(input.codigo, input.qr_payload);
   await conn.execute(
     `UPDATE productos SET
       codigo = ?, qr_payload = ?, codigo_pieza = ?, nombre = ?, especificacion = ?, repuesto = ?,
@@ -316,8 +364,8 @@ export async function updateProductoWithConnection(
       precio_venta_lista_bs = ?, precio_venta_lista_usd = ?, porcentaje_utilidad = ?, punto_tope = ?, estado = ?
      WHERE id = ?`,
     [
-      input.codigo,
-      input.qr_payload,
+      codigo,
+      qr_payload,
       input.codigo_pieza,
       input.nombre,
       input.especificacion,
@@ -378,4 +426,20 @@ export async function replaceProductoImagenesWithConnection(
     );
     orden += 1;
   }
+}
+
+/**
+ * Recalcula precio de venta en Bs usando el precio USD de cada producto.
+ * Devuelve la cantidad de filas afectadas.
+ */
+export async function refreshPrecioVentaBsDesdeTipoCambio(valorBsPorUsd: number): Promise<number> {
+  const tc = Number(valorBsPorUsd);
+  if (!Number.isFinite(tc) || tc <= 0) return 0;
+  const [res] = await pool.execute<ResultSetHeader>(
+    `UPDATE productos
+     SET precio_venta_lista_bs = ROUND(precio_venta_lista_usd * ?, 2)
+     WHERE precio_venta_lista_usd IS NOT NULL`,
+    [tc]
+  );
+  return res.affectedRows;
 }

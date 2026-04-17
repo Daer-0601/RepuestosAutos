@@ -29,7 +29,7 @@ export default async function EditarUsuarioPage({ params, searchParams }: Props)
   const sucursales = await listSucursales();
 
   return (
-    <AdminPageShell title={`Editar: ${u.username}`} error={sp.error}>
+    <AdminPageShell backHref="/admin/usuarios" backLabel="Usuarios" title={`Editar: ${u.username}`} error={sp.error}>
       <form
         action={updateUsuarioAction}
         className="max-w-xl space-y-4 rounded-2xl border border-white/10 bg-slate-900/40 p-6"

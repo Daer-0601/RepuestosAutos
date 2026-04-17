@@ -15,6 +15,8 @@ export default async function NuevoProductoPage({
 
   return (
     <AdminPageShell
+      backHref="/admin/productos"
+      backLabel="Productos"
       title="Nuevo producto"
       description="Al guardar se asignan código y QR en secuencia (mismo valor). Podés adjuntar imágenes. Los precios de lista y utilidad se cargan después (p. ej. al ingresar compra)."
       error={sp.error}

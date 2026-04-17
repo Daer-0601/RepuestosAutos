@@ -27,6 +27,15 @@ export async function saveProductoImagenUploads(files: File[]): Promise<string[]
   if (files.length === 0) return out;
 
   const token = blobToken();
+  const hayArchivos = files.some((f) => f instanceof File && f.size > 0);
+
+  /* En Vercel el disco no sirve para /uploads/ → 404. Obligatorio Blob con token en el proyecto. */
+  if (process.env.VERCEL === "1" && hayArchivos && !token) {
+    throw new Error(
+      "Falta BLOB_READ_WRITE_TOKEN en este proyecto de Vercel. Storage → tu Blob → conectá al proyecto " +
+        "o agregá la variable en Settings → Environment Variables (Production) y redeploy."
+    );
+  }
 
   if (token) {
     for (const file of files) {

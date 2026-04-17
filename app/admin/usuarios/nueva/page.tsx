@@ -21,7 +21,7 @@ export default async function NuevoUsuarioPage({
   const sucursales = await listSucursales();
 
   return (
-    <AdminPageShell title="Nuevo usuario" error={sp.error}>
+    <AdminPageShell backHref="/admin/usuarios" backLabel="Usuarios" title="Nuevo usuario" error={sp.error}>
       <form
         action={createUsuarioAction}
         className="max-w-xl space-y-4 rounded-2xl border border-white/10 bg-slate-900/40 p-6"
