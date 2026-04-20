@@ -255,6 +255,69 @@ export type StockBajoRow = {
   stock: number;
 };
 
+export type CardexVentaProductoRow = {
+  detalle_id: number;
+  venta_id: number;
+  fecha_venta: string | Date;
+  cantidad: number;
+  precio_unitario_bs: string | null;
+  total_linea_bs: string | null;
+  vendedor_nombre: string | null;
+  vendedor_username: string | null;
+  producto_codigo: string;
+  producto_nombre: string;
+  sucursal_nombre: string;
+};
+
+/**
+ * Movimientos de venta de un producto (código de barra / interno) en una sucursal,
+ * en el período seleccionado: quién vendió, fecha y hora (si `ventas.fecha` es DATETIME).
+ */
+export async function cardexVentasProductoPorSucursalYPeriodo(
+  codigoProducto: string,
+  sucursalId: number,
+  periodo: PeriodoReporte,
+  limitRows = 300
+): Promise<CardexVentaProductoRow[]> {
+  const codigo = codigoProducto.trim();
+  if (!codigo || !Number.isFinite(sucursalId) || sucursalId < 1) {
+    return [];
+  }
+  const cond = sqlCondicionVentasFecha(periodo);
+  const lim = sqlInt(limitRows, 500);
+  try {
+    const [rows] = await pool.execute<RowDataPacket[]>(
+      `SELECT d.id AS detalle_id,
+              v.id AS venta_id,
+              v.fecha AS fecha_venta,
+              d.cantidad,
+              d.precio_unitario_bs,
+              d.total_linea_bs,
+              u.nombre_completo AS vendedor_nombre,
+              u.username AS vendedor_username,
+              p.codigo AS producto_codigo,
+              p.nombre AS producto_nombre,
+              s.nombre AS sucursal_nombre
+       FROM venta_detalle d
+       INNER JOIN ventas v ON v.id = d.venta_id
+       INNER JOIN productos p ON p.id = d.producto_id
+       INNER JOIN sucursales s ON s.id = v.sucursal_id
+       LEFT JOIN usuarios u ON u.id = v.usuario_id
+       WHERE v.estado = 'confirmada'
+         AND (${cond})
+         AND v.sucursal_id = ?
+         AND TRIM(p.codigo) = ?
+       ORDER BY v.fecha DESC, v.id DESC, d.id DESC
+       LIMIT ${lim}`,
+      [sucursalId, codigo]
+    );
+    return rows as CardexVentaProductoRow[];
+  } catch (e) {
+    console.error("cardexVentasProductoPorSucursalYPeriodo", e);
+    return [];
+  }
+}
+
 export async function listStockBajo(limiteStock: number, limitRows = 50): Promise<StockBajoRow[]> {
   const lr = sqlInt(limitRows, 500);
   const [rows] = await pool.execute<RowDataPacket[]>(

@@ -2,9 +2,11 @@
 
 import { logout } from "@/lib/auth/logout";
 import {
+  ArrowLeftRight,
   BarChart3,
   Building2,
   DollarSign,
+  FileSpreadsheet,
   LayoutDashboard,
   LogOut,
   Menu,
@@ -21,9 +23,11 @@ import { useState } from "react";
 const nav = [
   { href: "/admin", label: "Inicio", icon: LayoutDashboard, exact: true },
   { href: "/admin/importacion", label: "Ingreso / compra", icon: Upload },
+  { href: "/admin/traspasos", label: "Traspasos", icon: ArrowLeftRight },
   { href: "/admin/reportes", label: "Reportes", icon: BarChart3 },
   { href: "/admin/usuarios", label: "Usuarios", icon: Users },
   { href: "/admin/productos", label: "Productos", icon: Package },
+  { href: "/admin/pedidos", label: "Pedidos (Excel)", icon: FileSpreadsheet },
   { href: "/admin/sucursales", label: "Sucursales", icon: Building2 },
   { href: "/admin/clientes", label: "Clientes", icon: UserCircle },
   { href: "/admin/tipo-cambio", label: "Tipo de cambio", icon: DollarSign },

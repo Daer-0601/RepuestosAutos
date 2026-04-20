@@ -41,6 +41,7 @@ export type ProductoBusquedaIngresoRow = {
   nombre: string;
   qr_payload: string;
   medida: string | null;
+  marca_auto: string | null;
   especificacion: string | null;
   descripcion: string | null;
   precio_venta_lista_bs: string | null;
@@ -69,7 +70,7 @@ export async function searchProductosParaIngreso(
 
   if (modo === "pieza") {
     const [rows] = await pool.query<RowDataPacket[]>(
-      `SELECT id, codigo, codigo_pieza, nombre, qr_payload, medida, especificacion, descripcion,
+      `SELECT id, codigo, codigo_pieza, nombre, qr_payload, medida, marca_auto, especificacion, descripcion,
               precio_venta_lista_bs, precio_venta_lista_usd, porcentaje_utilidad, punto_tope
        FROM productos
        WHERE estado = 'activo'
@@ -89,7 +90,7 @@ export async function searchProductosParaIngreso(
   }
   const likeNombre = `%${q.toLowerCase()}%`;
   const [rows] = await pool.query<RowDataPacket[]>(
-    `SELECT id, codigo, codigo_pieza, nombre, qr_payload, medida, especificacion, descripcion,
+    `SELECT id, codigo, codigo_pieza, nombre, qr_payload, medida, marca_auto, especificacion, descripcion,
             precio_venta_lista_bs, precio_venta_lista_usd, porcentaje_utilidad, punto_tope
      FROM productos p
      WHERE estado = 'activo'

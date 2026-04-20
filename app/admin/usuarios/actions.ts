@@ -116,3 +116,37 @@ export async function updateUsuarioAction(formData: FormData) {
   revalidatePath(`/admin/usuarios/${id}`);
   redirect("/admin/usuarios");
 }
+
+export async function setUsuarioActivoAction(formData: FormData) {
+  const admin = await getAdminSession();
+  if (!admin) {
+    redirect("/login");
+  }
+
+  const id = Number(formData.get("id"));
+  const activoRaw = String(formData.get("activo") ?? "").trim();
+  const activo = activoRaw === "1";
+
+  if (!Number.isFinite(id) || id <= 0) {
+    redirect(`/admin/usuarios?error=${encodeURIComponent("Usuario inválido.")}`);
+  }
+  if (activoRaw !== "0" && activoRaw !== "1") {
+    redirect(`/admin/usuarios?error=${encodeURIComponent("Estado inválido.")}`);
+  }
+
+  if (!activo && id === admin.userId) {
+    redirect(
+      `/admin/usuarios?error=${encodeURIComponent("No podés desactivarte a vos mismo.")}`
+    );
+  }
+
+  const existing = await repo.getUsuario(id);
+  if (!existing) {
+    redirect(`/admin/usuarios?error=${encodeURIComponent("Usuario no encontrado.")}`);
+  }
+
+  await repo.updateUsuarioActivo(id, activo);
+  revalidatePath("/admin/usuarios");
+  revalidatePath(`/admin/usuarios/${id}`);
+  redirect("/admin/usuarios");
+}

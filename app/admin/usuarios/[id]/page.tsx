@@ -1,3 +1,4 @@
+import { AdminPasswordField } from "@/app/admin/_components/admin-password-field";
 import { AdminPageShell } from "@/app/admin/_components/admin-page-shell";
 import { updateUsuarioAction } from "@/app/admin/usuarios/actions";
 import { etiquetaRolEspanol, listRoles } from "@/lib/data/roles";
@@ -62,19 +63,13 @@ export default async function EditarUsuarioPage({ params, searchParams }: Props)
             className={field}
           />
         </div>
-        <div>
-          <label htmlFor="password" className="text-xs font-medium uppercase tracking-wider text-slate-500">
-            Nueva contraseña (opcional)
-          </label>
-          <input
-            id="password"
-            name="password"
-            type="password"
-            autoComplete="new-password"
-            className={field}
-            placeholder="Dejar vacío para no cambiar"
-          />
-        </div>
+        <AdminPasswordField
+          id="password"
+          name="password"
+          label="Nueva contraseña (opcional)"
+          autoComplete="new-password"
+          placeholder="Dejar vacío para no cambiar"
+        />
         <div>
           <label htmlFor="rol_id" className="text-xs font-medium uppercase tracking-wider text-slate-500">
             Rol *

@@ -87,28 +87,10 @@ export function ProductosCatalogo({
             />
           </div>
           <div>
-            <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Procedencia</label>
-            <input
-              name="procedencia"
-              defaultValue={filtros.procedencia}
-              placeholder="Cualquier palabra alcanza"
-              className={`${inp} mt-1`}
-            />
-          </div>
-          <div>
-            <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Repuesto / tipo</label>
+            <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Repuesto </label>
             <input
               name="repuesto"
               defaultValue={filtros.repuesto}
-              placeholder="Cualquier palabra alcanza"
-              className={`${inp} mt-1`}
-            />
-          </div>
-          <div>
-            <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Marca auto</label>
-            <input
-              name="marca"
-              defaultValue={filtros.marca}
               placeholder="Cualquier palabra alcanza"
               className={`${inp} mt-1`}
             />

@@ -35,6 +35,21 @@ export default async function NuevoClientePage({
           <input id="telefono" name="telefono" className={field} />
         </div>
         <div>
+          <label
+            htmlFor="carnet_identidad"
+            className="text-xs font-medium uppercase tracking-wider text-slate-500"
+          >
+            Carnet de identidad
+          </label>
+          <input
+            id="carnet_identidad"
+            name="carnet_identidad"
+            className={field}
+            placeholder="Ej. V-12345678"
+            autoComplete="off"
+          />
+        </div>
+        <div>
           <label htmlFor="direccion" className="text-xs font-medium uppercase tracking-wider text-slate-500">
             Dirección
           </label>

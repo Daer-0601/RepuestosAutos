@@ -17,6 +17,7 @@ export async function createClienteAction(formData: FormData) {
 
   const nombre = String(formData.get("nombre") ?? "").trim();
   const telefono = String(formData.get("telefono") ?? "").trim() || null;
+  const carnet_identidad = String(formData.get("carnet_identidad") ?? "").trim() || null;
   const direccion = String(formData.get("direccion") ?? "").trim() || null;
   const activo = String(formData.get("activo") ?? "1") === "1";
 
@@ -24,7 +25,7 @@ export async function createClienteAction(formData: FormData) {
     q("El nombre es obligatorio.", "/admin/clientes/nueva");
   }
 
-  await repo.insertCliente({ nombre, telefono, direccion, activo });
+  await repo.insertCliente({ nombre, telefono, carnet_identidad, direccion, activo });
   revalidatePath("/admin/clientes");
   redirect("/admin/clientes");
 }
@@ -42,6 +43,7 @@ export async function updateClienteAction(formData: FormData) {
 
   const nombre = String(formData.get("nombre") ?? "").trim();
   const telefono = String(formData.get("telefono") ?? "").trim() || null;
+  const carnet_identidad = String(formData.get("carnet_identidad") ?? "").trim() || null;
   const direccion = String(formData.get("direccion") ?? "").trim() || null;
   const activo = String(formData.get("activo") ?? "1") === "1";
 
@@ -54,7 +56,7 @@ export async function updateClienteAction(formData: FormData) {
     q("Cliente no encontrado.", "/admin/clientes");
   }
 
-  await repo.updateCliente(id, { nombre, telefono, direccion, activo });
+  await repo.updateCliente(id, { nombre, telefono, carnet_identidad, direccion, activo });
   revalidatePath("/admin/clientes");
   revalidatePath(`/admin/clientes/${id}`);
   redirect("/admin/clientes");

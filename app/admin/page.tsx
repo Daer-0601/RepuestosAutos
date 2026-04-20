@@ -1,8 +1,10 @@
 import type { Metadata } from "next";
 import {
+  ArrowLeftRight,
   BarChart3,
   Building2,
   DollarSign,
+  FileSpreadsheet,
   Package,
   Upload,
   UserCircle,
@@ -30,6 +32,13 @@ const modules = [
     accent: "from-emerald-500/20 to-emerald-700/5 ring-emerald-500/20 text-emerald-200",
   },
   {
+    href: "/admin/traspasos",
+    title: "Traspasos",
+    desc: "Mové stock entre sucursales seleccionando productos.",
+    icon: ArrowLeftRight,
+    accent: "from-sky-500/20 to-slate-700/10 ring-sky-500/25 text-sky-100",
+  },
+  {
     href: "/admin/usuarios",
     title: "Usuarios",
     desc: "Alta, roles y sucursal asignada.",
@@ -42,6 +51,13 @@ const modules = [
     desc: "Catálogo, QR, imágenes y precios.",
     icon: Package,
     accent: "from-rose-500/15 to-emerald-600/10 ring-white/10 text-rose-100",
+  },
+  {
+    href: "/admin/pedidos",
+    title: "Pedidos (Excel)",
+    desc: "Seleccioná productos y descargá el pedido en .xlsx.",
+    icon: FileSpreadsheet,
+    accent: "from-sky-500/20 to-emerald-700/10 ring-sky-500/25 text-sky-100",
   },
   {
     href: "/admin/sucursales",

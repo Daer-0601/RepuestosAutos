@@ -23,6 +23,7 @@ export default async function AdminClientesPage() {
             <tr>
               <th className="px-4 py-3 font-medium">Nombre</th>
               <th className="px-4 py-3 font-medium">Teléfono</th>
+              <th className="px-4 py-3 font-medium">Carnet</th>
               <th className="px-4 py-3 font-medium">Activo</th>
               <th className="px-4 py-3 font-medium text-right">Acciones</th>
             </tr>
@@ -30,7 +31,7 @@ export default async function AdminClientesPage() {
           <tbody className="divide-y divide-white/5">
             {rows.length === 0 ? (
               <tr>
-                <td className="px-4 py-8 text-center text-slate-500" colSpan={4}>
+                <td className="px-4 py-8 text-center text-slate-500" colSpan={5}>
                   No hay clientes registrados.
                 </td>
               </tr>
@@ -39,6 +40,7 @@ export default async function AdminClientesPage() {
                 <tr key={c.id} className="hover:bg-white/[0.02]">
                   <td className="px-4 py-3 font-medium text-white">{c.nombre}</td>
                   <td className="px-4 py-3 text-slate-400">{c.telefono ?? "—"}</td>
+                  <td className="px-4 py-3 font-mono text-slate-400">{c.carnet_identidad ?? "—"}</td>
                   <td className="px-4 py-3">
                     <span
                       className={

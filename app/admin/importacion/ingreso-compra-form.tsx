@@ -19,6 +19,7 @@ type ProductoBusqueda = {
   nombre: string;
   qr_payload: string;
   medida: string | null;
+  marca_auto: string | null;
   especificacion: string | null;
   descripcion: string | null;
   precio_venta_lista_bs: string | null;
@@ -808,6 +809,7 @@ export function IngresoCompraForm({
                             <ProductoQrImagenesControls
                               codigo={line.codigoLabel}
                               qrPayload={line.qrPayload}
+                              descripcion={line.descripcion}
                               imagenesUrls={imagenesUrlsDesdeTexto(line.imagenesText)}
                               size="sm"
                             />

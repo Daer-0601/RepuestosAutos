@@ -7,13 +7,14 @@ export type ClienteRow = {
   id: number;
   nombre: string;
   telefono: string | null;
+  carnet_identidad: string | null;
   direccion: string | null;
   activo: number;
 };
 
 export async function listClientes(): Promise<ClienteRow[]> {
   const [rows] = await pool.execute<RowDataPacket[]>(
-    `SELECT id, nombre, telefono, direccion, activo
+    `SELECT id, nombre, telefono, carnet_identidad, direccion, activo
      FROM clientes
      ORDER BY nombre ASC`
   );
@@ -22,7 +23,7 @@ export async function listClientes(): Promise<ClienteRow[]> {
 
 export async function getCliente(id: number): Promise<ClienteRow | null> {
   const [rows] = await pool.execute<RowDataPacket[]>(
-    `SELECT id, nombre, telefono, direccion, activo FROM clientes WHERE id = ? LIMIT 1`,
+    `SELECT id, nombre, telefono, carnet_identidad, direccion, activo FROM clientes WHERE id = ? LIMIT 1`,
     [id]
   );
   const r = rows[0] as ClienteRow | undefined;
@@ -32,13 +33,20 @@ export async function getCliente(id: number): Promise<ClienteRow | null> {
 export async function insertCliente(input: {
   nombre: string;
   telefono: string | null;
+  carnet_identidad: string | null;
   direccion: string | null;
   activo: boolean;
 }): Promise<number> {
   const [res] = await pool.execute<ResultSetHeader>(
-    `INSERT INTO clientes (nombre, telefono, direccion, activo)
-     VALUES (?, ?, ?, ?)`,
-    [input.nombre, input.telefono, input.direccion, input.activo ? 1 : 0]
+    `INSERT INTO clientes (nombre, telefono, carnet_identidad, direccion, activo)
+     VALUES (?, ?, ?, ?, ?)`,
+    [
+      input.nombre,
+      input.telefono,
+      input.carnet_identidad,
+      input.direccion,
+      input.activo ? 1 : 0,
+    ]
   );
   return res.insertId;
 }
@@ -48,12 +56,20 @@ export async function updateCliente(
   input: {
     nombre: string;
     telefono: string | null;
+    carnet_identidad: string | null;
     direccion: string | null;
     activo: boolean;
   }
 ): Promise<void> {
   await pool.execute(
-    `UPDATE clientes SET nombre = ?, telefono = ?, direccion = ?, activo = ? WHERE id = ?`,
-    [input.nombre, input.telefono, input.direccion, input.activo ? 1 : 0, id]
+    `UPDATE clientes SET nombre = ?, telefono = ?, carnet_identidad = ?, direccion = ?, activo = ? WHERE id = ?`,
+    [
+      input.nombre,
+      input.telefono,
+      input.carnet_identidad,
+      input.direccion,
+      input.activo ? 1 : 0,
+      id,
+    ]
   );
 }

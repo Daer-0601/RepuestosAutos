@@ -118,3 +118,7 @@ export async function updateUsuario(
     );
   }
 }
+
+export async function updateUsuarioActivo(id: number, activo: boolean): Promise<void> {
+  await pool.execute(`UPDATE usuarios SET activo = ? WHERE id = ?`, [activo ? 1 : 0, id]);
+}

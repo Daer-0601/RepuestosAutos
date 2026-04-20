@@ -1,5 +1,6 @@
 import { AdminPageShell } from "@/app/admin/_components/admin-page-shell";
 import {
+  cardexVentasProductoPorSucursalYPeriodo,
   comprasPorSucursalPorPeriodo,
   etiquetaPeriodo,
   listStockBajo,
@@ -25,23 +26,65 @@ function parseSucursalFiltro(raw: string | string[] | undefined): number | null 
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
-function queryPreservandoSucursal(periodo: PeriodoReporte, sucursalId: number | null): string {
+function parseCodigoCardex(raw: string | string[] | undefined): string | null {
+  if (raw == null) return null;
+  const s = Array.isArray(raw) ? raw[0] : raw;
+  const t = String(s ?? "").trim();
+  return t.length > 0 ? t : null;
+}
+
+function formatFechaHoraVenta(value: string | Date | null | undefined): string {
+  if (value == null) return "—";
+  if (value instanceof Date) {
+    const hasTime = value.getHours() !== 0 || value.getMinutes() !== 0 || value.getSeconds() !== 0;
+    return hasTime
+      ? value.toLocaleString("es-BO", { dateStyle: "short", timeStyle: "short" })
+      : value.toLocaleDateString("es-BO", { dateStyle: "short" });
+  }
+  const s = String(value).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+    const [y, m, d] = s.split("-").map(Number);
+    return new Date(y, m - 1, d).toLocaleDateString("es-BO", { dateStyle: "short" });
+  }
+  const normalized = s.includes("T") ? s : s.replace(" ", "T");
+  const dt = new Date(normalized);
+  if (!Number.isNaN(dt.getTime())) {
+    const hasTime = / \d{1,2}:\d{2}/.test(s) || /T\d{2}:\d{2}/.test(normalized);
+    return hasTime
+      ? dt.toLocaleString("es-BO", { dateStyle: "short", timeStyle: "short" })
+      : dt.toLocaleDateString("es-BO", { dateStyle: "short" });
+  }
+  return s;
+}
+
+function queryPreservandoSucursal(
+  periodo: PeriodoReporte,
+  sucursalId: number | null,
+  codigoCardex: string | null
+): string {
   const p = new URLSearchParams();
   p.set("periodo", periodo);
   if (sucursalId != null) p.set("sucursal", String(sucursalId));
-  const s = p.toString();
-  return s ? `?${s}` : "";
+  if (codigoCardex) p.set("codigo", codigoCardex);
+  const qs = p.toString();
+  return qs ? `?${qs}` : "";
 }
 
 export default async function AdminReportesPage({
   searchParams,
 }: {
-  searchParams: Promise<{ periodo?: string; sucursal?: string }>;
+  searchParams: Promise<{ periodo?: string; sucursal?: string; codigo?: string }>;
 }) {
   const sp = await searchParams;
   const periodo = parsePeriodoReporte(sp.periodo);
   const sucursalFiltro = parseSucursalFiltro(sp.sucursal);
+  const codigoCardex = parseCodigoCardex(sp.codigo);
   const sucursales = await listSucursales();
+
+  const cardexPromise =
+    codigoCardex != null && sucursalFiltro != null
+      ? cardexVentasProductoPorSucursalYPeriodo(codigoCardex, sucursalFiltro, periodo, 300)
+      : Promise.resolve(null);
 
   const [
     ventas,
@@ -51,6 +94,7 @@ export default async function AdminReportesPage({
     topVendedores,
     topProductos,
     stockBajo,
+    cardexVentas,
   ] = await Promise.all([
     resumenVentasPorPeriodo(periodo, sucursalFiltro),
     resumenComprasPorPeriodo(periodo, sucursalFiltro),
@@ -59,6 +103,7 @@ export default async function AdminReportesPage({
     topVendedoresPorPeriodo(periodo, sucursalFiltro, 15),
     topProductosPorPeriodo(periodo, sucursalFiltro, 15),
     listStockBajo(5, 40),
+    cardexPromise,
   ]);
 
   const periodoLinks: { id: PeriodoReporte; label: string }[] = [
@@ -77,7 +122,7 @@ export default async function AdminReportesPage({
       title="Reportes"
       description={`${etiquetaPeriodo(periodo)} · ventas y compras confirmadas${
         nombreSucursalActiva ? ` · sucursal: ${nombreSucursalActiva}` : " · todas las sucursales"
-      }. Stock bajo: unidades ≤ 5 (global).`}
+      }. Cardex: código + sucursal. Stock bajo: unidades ≤ 5 (global).`}
     >
       <div className="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-end sm:justify-between">
         <div className="flex flex-wrap gap-2">
@@ -87,7 +132,7 @@ export default async function AdminReportesPage({
           {periodoLinks.map(({ id, label }) => (
             <Link
               key={id}
-              href={`/admin/reportes${queryPreservandoSucursal(id, sucursalFiltro)}`}
+              href={`/admin/reportes${queryPreservandoSucursal(id, sucursalFiltro, codigoCardex)}`}
               className={`rounded-lg px-3 py-2 text-sm font-medium transition ${
                 periodo === id
                   ? "bg-sky-600 text-white ring-2 ring-sky-400/40"
@@ -121,6 +166,20 @@ export default async function AdminReportesPage({
                 ))}
             </select>
           </div>
+          <div>
+            <label htmlFor="codigo-cardex" className="block text-xs font-medium uppercase tracking-wider text-slate-500">
+              Código (cardex)
+            </label>
+            <input
+              id="codigo-cardex"
+              name="codigo"
+              type="text"
+              defaultValue={codigoCardex ?? ""}
+              placeholder="Código de barra / interno"
+              autoComplete="off"
+              className="mt-1 min-w-[11rem] rounded-lg border border-white/10 bg-slate-900/80 px-3 py-2 font-mono text-sm text-white outline-none placeholder:text-slate-600 focus:border-sky-500/50"
+            />
+          </div>
           <button
             type="submit"
             className="rounded-lg border border-white/15 bg-slate-800 px-3 py-2 text-sm font-medium text-white hover:bg-slate-700"
@@ -129,6 +188,73 @@ export default async function AdminReportesPage({
           </button>
         </form>
       </div>
+
+      <section className="mt-8 rounded-2xl border border-sky-500/25 bg-sky-950/20 p-5">
+        <h2 className="text-sm font-semibold text-sky-100">Cardex de ventas por sucursal</h2>
+        <p className="mt-1 text-xs text-slate-400">
+          Elegí una <strong className="font-medium text-slate-300">sucursal</strong>, ingresá el{" "}
+          <strong className="font-medium text-slate-300">código</strong> del producto y pulsá Filtrar. Se listan las
+          ventas del <strong className="font-medium text-slate-300">{etiquetaPeriodo(periodo).toLowerCase()}</strong>{" "}
+          con vendedor, fecha y hora (si el registro incluye hora).
+        </p>
+        {codigoCardex != null && sucursalFiltro == null ? (
+          <p className="mt-3 text-sm text-amber-200/90">
+            Para ver el cardex tenés que elegir una sucursal (no &quot;Todas&quot;).
+          </p>
+        ) : null}
+        {codigoCardex == null && sucursalFiltro != null ? (
+          <p className="mt-3 text-sm text-slate-500">Ingresá un código de producto y volvé a filtrar.</p>
+        ) : null}
+        {cardexVentas != null ? (
+          <div className="mt-4 overflow-x-auto rounded-xl border border-white/10 bg-slate-900/50">
+            <table className="w-full min-w-[640px] text-left text-sm">
+              <thead className="border-b border-white/10 bg-black/25 text-xs uppercase text-slate-500">
+                <tr>
+                  <th className="px-4 py-3">Venta</th>
+                  <th className="px-4 py-3">Fecha / hora</th>
+                  <th className="px-4 py-3">Vendedor</th>
+                  <th className="px-4 py-3">Usuario</th>
+                  <th className="px-4 py-3">Cant.</th>
+                  <th className="px-4 py-3">P. unitario Bs</th>
+                  <th className="px-4 py-3">Total línea Bs</th>
+                  <th className="px-4 py-3">Producto</th>
+                  <th className="px-4 py-3">Sucursal</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/5">
+                {cardexVentas.length === 0 ? (
+                  <tr>
+                    <td className="px-4 py-6 text-slate-500" colSpan={9}>
+                      No hay líneas de venta para ese código en esta sucursal y período.
+                    </td>
+                  </tr>
+                ) : (
+                  cardexVentas.map((r) => (
+                    <tr key={r.detalle_id} className="hover:bg-white/[0.02]">
+                      <td className="px-4 py-3 font-mono text-slate-300">#{r.venta_id}</td>
+                      <td className="px-4 py-3 whitespace-nowrap text-slate-200">
+                        {formatFechaHoraVenta(r.fecha_venta)}
+                      </td>
+                      <td className="max-w-[160px] truncate px-4 py-3 text-white">
+                        {r.vendedor_nombre?.trim() || "—"}
+                      </td>
+                      <td className="px-4 py-3 font-mono text-slate-400">{r.vendedor_username?.trim() || "—"}</td>
+                      <td className="px-4 py-3 text-amber-200">{r.cantidad}</td>
+                      <td className="px-4 py-3 font-mono text-slate-200">{r.precio_unitario_bs ?? "0.00"}</td>
+                      <td className="px-4 py-3 font-mono text-emerald-200">{r.total_linea_bs ?? "0.00"}</td>
+                      <td className="max-w-[220px] px-4 py-3">
+                        <span className="font-mono text-xs text-slate-500">{r.producto_codigo}</span>
+                        <span className="mt-0.5 block truncate text-slate-200">{r.producto_nombre}</span>
+                      </td>
+                      <td className="px-4 py-3 text-slate-400">{r.sucursal_nombre}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
+      </section>
 
       <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <div className="rounded-2xl border border-white/10 bg-slate-900/50 p-5">

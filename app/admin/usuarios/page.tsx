@@ -1,5 +1,7 @@
 import { AdminButtonLink } from "@/app/admin/_components/admin-button-link";
 import { AdminPageShell } from "@/app/admin/_components/admin-page-shell";
+import { setUsuarioActivoAction } from "@/app/admin/usuarios/actions";
+import { requireAdmin } from "@/lib/auth/require-role";
 import { etiquetaRolEspanol } from "@/lib/data/roles";
 import { listUsuarios } from "@/lib/data/usuarios";
 import type { Metadata } from "next";
@@ -9,7 +11,13 @@ export const metadata: Metadata = {
   title: "Usuarios",
 };
 
-export default async function AdminUsuariosPage() {
+export default async function AdminUsuariosPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ error?: string }>;
+}) {
+  const sp = await searchParams;
+  const session = await requireAdmin();
   const rows = await listUsuarios();
 
   return (
@@ -17,6 +25,7 @@ export default async function AdminUsuariosPage() {
       title="Usuarios"
       description="Roles: Administrador (sin sucursal), Cajero y Vendedor con sucursal obligatoria."
       actions={<AdminButtonLink href="/admin/usuarios/nueva">Nuevo usuario</AdminButtonLink>}
+      error={sp.error}
     >
       <div className="overflow-x-auto rounded-2xl border border-white/10 bg-slate-900/40">
         <table className="w-full min-w-[720px] text-left text-sm">
@@ -47,15 +56,35 @@ export default async function AdminUsuariosPage() {
                   </td>
                   <td className="px-4 py-3 text-slate-400">{u.sucursal_nombre ?? "—"}</td>
                   <td className="px-4 py-3">
-                    <span
-                      className={
-                        u.activo
-                          ? "rounded-full bg-emerald-500/15 px-2 py-0.5 text-xs text-emerald-300"
-                          : "rounded-full bg-slate-500/20 px-2 py-0.5 text-xs text-slate-400"
-                      }
-                    >
-                      {u.activo ? "sí" : "no"}
-                    </span>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span
+                        className={
+                          u.activo
+                            ? "rounded-full bg-emerald-500/15 px-2 py-0.5 text-xs text-emerald-300"
+                            : "rounded-full bg-slate-500/20 px-2 py-0.5 text-xs text-slate-400"
+                        }
+                      >
+                        {u.activo ? "sí" : "no"}
+                      </span>
+                      <form action={setUsuarioActivoAction} className="inline">
+                        <input type="hidden" name="id" value={u.id} />
+                        <input type="hidden" name="activo" value={u.activo ? "0" : "1"} />
+                        <button
+                          type="submit"
+                          disabled={Boolean(u.activo && u.id === session.userId)}
+                          title={
+                            u.activo && u.id === session.userId
+                              ? "No podés desactivarte a vos mismo"
+                              : u.activo
+                                ? "Desactivar usuario"
+                                : "Activar usuario"
+                          }
+                          className="rounded-lg border border-white/15 bg-white/5 px-2.5 py-1 text-xs font-medium text-slate-200 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          {u.activo ? "Desactivar" : "Activar"}
+                        </button>
+                      </form>
+                    </div>
                   </td>
                   <td className="px-4 py-3 text-right">
                     <Link

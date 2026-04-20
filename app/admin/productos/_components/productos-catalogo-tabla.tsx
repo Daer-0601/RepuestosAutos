@@ -220,6 +220,7 @@ export function ProductosCatalogoTabla({
                     <ProductoQrImagenesControls
                       codigo={r.codigo}
                       qrPayload={r.qr_payload}
+                      descripcion={r.descripcion ?? r.nombre}
                       imagenesUrls={r.imagenes_urls}
                       onOpenInteraction={(e) => e.stopPropagation()}
                     />

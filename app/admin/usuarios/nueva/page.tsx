@@ -1,3 +1,4 @@
+import { AdminPasswordField } from "@/app/admin/_components/admin-password-field";
 import { AdminPageShell } from "@/app/admin/_components/admin-page-shell";
 import { createUsuarioAction } from "@/app/admin/usuarios/actions";
 import { etiquetaRolEspanol, listRoles } from "@/lib/data/roles";
@@ -41,19 +42,13 @@ export default async function NuevoUsuarioPage({
           </label>
           <input id="username" name="username" required autoComplete="off" className={field} />
         </div>
-        <div>
-          <label htmlFor="password" className="text-xs font-medium uppercase tracking-wider text-slate-500">
-            Contraseña *
-          </label>
-          <input
-            id="password"
-            name="password"
-            type="password"
-            required
-            autoComplete="new-password"
-            className={field}
-          />
-        </div>
+        <AdminPasswordField
+          id="password"
+          name="password"
+          label="Contraseña *"
+          required
+          autoComplete="new-password"
+        />
         <div>
           <label htmlFor="rol_id" className="text-xs font-medium uppercase tracking-wider text-slate-500">
             Rol *

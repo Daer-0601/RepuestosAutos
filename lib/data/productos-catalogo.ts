@@ -13,9 +13,7 @@ export type CatalogoFiltrosInput = {
   especificacion: string;
   medida: string;
   descripcion: string;
-  procedencia: string;
   repuesto: string;
-  marca: string;
   /** vacío = cualquiera; cero = sin stock; positivo = con stock total > 0 */
   stock: "" | "cero" | "positivo";
   /** Solo productos con stock &gt; 0 en esta sucursal */
@@ -135,8 +133,6 @@ function addFlexibleBusquedaAmplia(parts: string[], params: (string | number | n
     "IFNULL(p.especificacion,'')",
     "IFNULL(p.medida,'')",
     "IFNULL(p.repuesto,'')",
-    "IFNULL(p.procedencia,'')",
-    "IFNULL(p.marca_auto,'')",
   ];
 
   const perToken = tokens.map(() => {
@@ -167,9 +163,7 @@ function buildWhere(f: CatalogoFiltrosInput): { sql: string; params: (string | n
   addFlexibleColumnAnyToken(parts, params, "IFNULL(p.especificacion,'')", f.especificacion);
   addFlexibleColumnAnyToken(parts, params, "IFNULL(p.medida,'')", f.medida);
   addFlexibleColumnAnyToken(parts, params, "IFNULL(p.descripcion,'')", f.descripcion);
-  addFlexibleColumnAnyToken(parts, params, "IFNULL(p.procedencia,'')", f.procedencia);
   addFlexibleColumnAnyToken(parts, params, "IFNULL(p.repuesto,'')", f.repuesto);
-  addFlexibleColumnAnyToken(parts, params, "IFNULL(p.marca_auto,'')", f.marca);
 
   if (f.stock === "cero") {
     parts.push(
@@ -292,9 +286,7 @@ export function stringifyCatalogoFiltros(
   if (m.especificacion.trim()) p.set("especificacion", m.especificacion.trim());
   if (m.medida.trim()) p.set("medida", m.medida.trim());
   if (m.descripcion.trim()) p.set("descripcion", m.descripcion.trim());
-  if (m.procedencia.trim()) p.set("procedencia", m.procedencia.trim());
   if (m.repuesto.trim()) p.set("repuesto", m.repuesto.trim());
-  if (m.marca.trim()) p.set("marca", m.marca.trim());
   if (m.stock) p.set("stock", m.stock);
   if (m.sucursalStockId != null) p.set("sucursal", String(m.sucursalStockId));
   if (m.estado === "") p.set("estado", "todos");
@@ -334,9 +326,7 @@ export function parseCatalogoFiltros(sp: Record<string, string | string[] | unde
     especificacion: s("especificacion"),
     medida: s("medida"),
     descripcion: s("descripcion"),
-    procedencia: s("procedencia"),
     repuesto: s("repuesto"),
-    marca: s("marca"),
     stock,
     sucursalStockId,
     estado,
