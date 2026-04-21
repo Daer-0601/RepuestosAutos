@@ -271,7 +271,7 @@ export async function listProductosCatalogo(f: CatalogoFiltrosInput): Promise<Pr
                FROM producto_imagenes pi WHERE pi.producto_id = p.id) AS imagenes_concat
      FROM productos p
      ${sql}
-     ORDER BY p.id DESC
+     ORDER BY LOWER(p.nombre) ASC, LOWER(p.codigo) ASC, p.id ASC
      LIMIT ${lim} OFFSET 0`,
     params
   );
