@@ -3,8 +3,8 @@ import "server-only";
 import { pool } from "@/lib/db";
 import { getCliente } from "@/lib/data/clientes";
 import { condicionCodigoQrExacta } from "@/lib/data/producto-codigo-busqueda-exacta";
+import { CATALOGO_FILAS_DEFAULT, CATALOGO_FILAS_MAX } from "@/lib/catalogo-productos-constants";
 import {
-  CATALOGO_FILAS_MAX,
   countProductosCatalogo,
   listInventarioPorProductoIds,
   listProductosCatalogo,
@@ -68,7 +68,7 @@ export function parseVentaCatalogoFiltros(
     modoRaw === "referencia" || modoRaw === "todos" ? modoRaw : "mi_sucursal";
   const perRaw = Number(b.perPage);
   const pageSize =
-    Number.isFinite(perRaw) && perRaw >= 10 ? sqlInt(perRaw, CATALOGO_FILAS_MAX) : 40;
+    Number.isFinite(perRaw) && perRaw >= 10 ? sqlInt(perRaw, CATALOGO_FILAS_MAX) : CATALOGO_FILAS_DEFAULT;
   const fields = catalogoCamposTexto(b);
 
   if (modo === "mi_sucursal") {

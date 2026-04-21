@@ -1,9 +1,12 @@
 import "server-only";
 
+import { CATALOGO_FILAS_DEFAULT, CATALOGO_FILAS_MAX } from "@/lib/catalogo-productos-constants";
 import { pool } from "@/lib/db";
 import { condicionCodigoQrExacta } from "@/lib/data/producto-codigo-busqueda-exacta";
 import { sqlInt } from "@/lib/data/sql-utils";
 import type { RowDataPacket } from "mysql2";
+
+export { CATALOGO_FILAS_DEFAULT, CATALOGO_FILAS_MAX } from "@/lib/catalogo-productos-constants";
 
 export type CatalogoFiltrosInput = {
   /** Búsqueda amplia: tokens; basta que uno coincida en nombre, pieza, descripción, etc. (no usa código interno). */
@@ -19,14 +22,9 @@ export type CatalogoFiltrosInput = {
   /** Solo productos con stock &gt; 0 en esta sucursal */
   sucursalStockId: number | null;
   estado: "" | "activo" | "inactivo";
-  /** Filas por carga (por defecto 50 para que la página no sea lenta). */
+  /** Filas por carga (ver `CATALOGO_FILAS_DEFAULT` en `lib/catalogo-productos-constants.ts`). */
   pageSize: number;
 };
-
-/** Por defecto al entrar a productos. */
-export const CATALOGO_FILAS_DEFAULT = 50;
-/** Máximo permitido en el selector «Filas». */
-export const CATALOGO_FILAS_MAX = 500;
 
 function parseImagenesGroupConcat(raw: string | null | undefined): string[] {
   if (raw == null || raw === "") return [];

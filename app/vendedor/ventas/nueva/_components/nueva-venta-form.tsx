@@ -1,6 +1,7 @@
 "use client";
 
 import { VentaCatalogoTabla } from "@/app/vendedor/ventas/nueva/_components/venta-catalogo-tabla";
+import { CATALOGO_FILAS_DEFAULT } from "@/lib/catalogo-productos-constants";
 import type { ModoCatalogoVenta, ProductoVentaCompletoRow, VentaCatalogoApiRow } from "@/lib/types/venta-vendedor-catalogo";
 import { CheckCircle2, Loader2, Plus, ScanLine, Trash2 } from "lucide-react";
 import Link from "next/link";
@@ -100,7 +101,7 @@ export function NuevaVentaForm() {
   const [descripcion, setDescripcion] = useState("");
   const [repuesto, setRepuesto] = useState("");
   const [modoCatalogo, setModoCatalogo] = useState<ModoCatalogoVenta>("mi_sucursal");
-  const [perPage, setPerPage] = useState("40");
+  const [perPage, setPerPage] = useState(String(CATALOGO_FILAS_DEFAULT));
 
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [catalogBuscado, setCatalogBuscado] = useState(false);
@@ -215,7 +216,7 @@ export function NuevaVentaForm() {
           descripcion,
           repuesto,
           modo: modoCatalogo,
-          perPage: Number.isFinite(per) && per >= 10 ? per : 40,
+          perPage: Number.isFinite(per) && per >= 10 ? per : CATALOGO_FILAS_DEFAULT,
         }),
       });
       const data = (await res.json()) as {
@@ -508,7 +509,7 @@ export function NuevaVentaForm() {
                 setDescripcion("");
                 setRepuesto("");
                 setModoCatalogo("mi_sucursal");
-                setPerPage("40");
+                setPerPage(String(CATALOGO_FILAS_DEFAULT));
               }}
             >
               Limpiar filtros
