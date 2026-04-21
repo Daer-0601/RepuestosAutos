@@ -56,7 +56,13 @@ function NavLink({
   );
 }
 
-export function CajeroSidebar({ username }: { username: string }) {
+export function CajeroSidebar({
+  username,
+  sucursalNombre,
+}: {
+  username: string;
+  sucursalNombre: string;
+}) {
   const [open, setOpen] = useState(false);
 
   return (
@@ -92,7 +98,7 @@ export function CajeroSidebar({ username }: { username: string }) {
             </div>
             <div className="min-w-0">
               <p className="truncate text-sm font-semibold text-white">Repuestos</p>
-              <p className="truncate text-xs text-emerald-400/90">Caja · reportes</p>
+              <p className="truncate text-xs text-emerald-400/90">Caja · {sucursalNombre}</p>
             </div>
           </div>
           <button
@@ -121,6 +127,7 @@ export function CajeroSidebar({ username }: { username: string }) {
         <div className="border-t border-white/10 p-3">
           <p className="truncate px-3 pb-2 text-xs text-slate-500">
             Sesión: <span className="text-slate-300">{username}</span>
+            <span className="mt-1 block truncate text-[11px] text-emerald-400/80">{sucursalNombre}</span>
           </p>
           <form action={logout}>
             <button

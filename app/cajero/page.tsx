@@ -37,7 +37,14 @@ const cards = [
   },
 ] as const;
 
-export default function CajeroHomePage() {
+export default async function CajeroHomePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ error?: string }>;
+}) {
+  const sp = await searchParams;
+  const errorMsg = sp.error?.trim() || null;
+
   return (
     <div className="mx-auto max-w-5xl">
       <h1 className="text-2xl font-semibold tracking-tight text-white sm:text-3xl">
@@ -47,7 +54,16 @@ export default function CajeroHomePage() {
         Reportes de la sucursal asignada a tu usuario. Usá el menú o las tarjetas.
       </p>
 
-      <ul className="mt-10 grid gap-4 sm:grid-cols-2">
+      {errorMsg ? (
+        <p
+          className="mt-6 rounded-xl border border-rose-500/30 bg-rose-950/40 px-4 py-3 text-sm text-rose-100"
+          role="alert"
+        >
+          {errorMsg}
+        </p>
+      ) : null}
+
+      <ul className={`grid gap-4 sm:grid-cols-2 ${errorMsg ? "mt-6" : "mt-10"}`}>
         {cards.map(({ href, title, desc, icon: Icon, ring }) => (
           <li key={href}>
             <Link

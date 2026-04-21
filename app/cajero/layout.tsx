@@ -1,5 +1,5 @@
 import { PanelAppBackground } from "@/app/_components/panel-app-background";
-import { requireCashier } from "@/lib/auth/require-role";
+import { requireCajeroContext } from "@/lib/auth/staff-panel-context";
 import type { Metadata } from "next";
 import { CajeroSidebar } from "./cajero-sidebar";
 
@@ -15,12 +15,12 @@ export default async function CajeroLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const session = await requireCashier();
+  const ctx = await requireCajeroContext();
 
   return (
     <div className="relative flex min-h-dvh flex-col overflow-x-hidden text-slate-100 lg:flex-row">
       <PanelAppBackground />
-      <CajeroSidebar username={session.username} />
+      <CajeroSidebar username={ctx.username} sucursalNombre={ctx.sucursalNombre} />
       <main className="relative z-10 min-h-0 flex-1 overflow-y-auto p-5 sm:p-6 lg:p-8">
         {children}
       </main>

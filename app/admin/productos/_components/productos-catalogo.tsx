@@ -1,4 +1,5 @@
 import { AdminButtonLink } from "@/app/admin/_components/admin-button-link";
+import { CatalogoSearchInput } from "@/app/admin/productos/_components/catalogo-search-input";
 import { ProductosCatalogoTabla } from "@/app/admin/productos/_components/productos-catalogo-tabla";
 import type { SucursalRow } from "@/lib/data/sucursales";
 import {
@@ -28,7 +29,7 @@ export function ProductosCatalogo({
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5">
           <div className="lg:col-span-2">
             <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Buscar (todo)</label>
-            <input
+            <CatalogoSearchInput
               name="q"
               defaultValue={filtros.q}
               placeholder="Palabras sueltas; basta con que una coincida…"
@@ -40,7 +41,7 @@ export function ProductosCatalogo({
           </div>
           <div>
             <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Código</label>
-            <input
+            <CatalogoSearchInput
               name="codigo"
               defaultValue={filtros.codigo}
               placeholder="Ej. 1000 o 001000 (exacto)"
@@ -52,7 +53,7 @@ export function ProductosCatalogo({
           </div>
           <div>
             <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Código pieza</label>
-            <input
+            <CatalogoSearchInput
               name="codigo_pieza"
               defaultValue={filtros.codigo_pieza}
               placeholder="Cualquier palabra alcanza"
@@ -61,7 +62,7 @@ export function ProductosCatalogo({
           </div>
           <div>
             <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Especificación</label>
-            <input
+            <CatalogoSearchInput
               name="especificacion"
               defaultValue={filtros.especificacion}
               placeholder="Cualquier palabra alcanza"
@@ -70,7 +71,7 @@ export function ProductosCatalogo({
           </div>
           <div>
             <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Medida</label>
-            <input
+            <CatalogoSearchInput
               name="medida"
               defaultValue={filtros.medida}
               placeholder="Cualquier palabra alcanza"
@@ -79,7 +80,7 @@ export function ProductosCatalogo({
           </div>
           <div>
             <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Descripción</label>
-            <input
+            <CatalogoSearchInput
               name="descripcion"
               defaultValue={filtros.descripcion}
               placeholder="Cualquier palabra alcanza"
@@ -88,7 +89,7 @@ export function ProductosCatalogo({
           </div>
           <div>
             <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Repuesto </label>
-            <input
+            <CatalogoSearchInput
               name="repuesto"
               defaultValue={filtros.repuesto}
               placeholder="Cualquier palabra alcanza"

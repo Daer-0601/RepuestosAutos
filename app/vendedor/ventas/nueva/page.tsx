@@ -1,4 +1,5 @@
 import { PanelSection } from "@/app/_components/panel-section";
+import { NuevaVentaForm } from "@/app/vendedor/ventas/nueva/_components/nueva-venta-form";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
@@ -10,23 +11,9 @@ export default function VendedorNuevaVentaPage() {
     <PanelSection
       variant="vendedor"
       title="Nueva venta"
-      description="Carrito, tipo de pago, cliente opcional y descuento de stock por sucursal."
+      description="Buscá por código o QR, revisá precio y cantidad, confirmá con tipo de pago. El stock baja por lotes FIFO y queda registro en movimientos_inventario."
     >
-      <p>
-        Flujo sobre{" "}
-        <code className="rounded bg-white/10 px-1.5 py-0.5 font-mono text-xs text-slate-200">
-          ventas
-        </code>
-        ,{" "}
-        <code className="rounded bg-white/10 px-1.5 py-0.5 font-mono text-xs text-slate-200">
-          venta_detalle
-        </code>{" "}
-        y asignación FIFO de{" "}
-        <code className="rounded bg-white/10 px-1.5 py-0.5 font-mono text-xs text-slate-200">
-          lotes
-        </code>
-        .
-      </p>
+      <NuevaVentaForm />
     </PanelSection>
   );
 }
