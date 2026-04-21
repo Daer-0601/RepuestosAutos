@@ -106,6 +106,49 @@ function addFlexibleColumnAnyToken(
   }
 }
 
+/**
+ * Tokens más permisivos para el campo «Descripción» del catálogo (más separadores).
+ */
+function searchTokensDescripcion(raw: string, maxTokens = 20): string[] {
+  return raw
+    .trim()
+    .slice(0, 400)
+    .split(/[\s,;.\/_|\-–—()[\]{}]+/)
+    .map((t) => t.replace(/%/g, "").replace(/['\u2018\u2019`´]/g, "").trim())
+    .filter((t) => t.length > 0)
+    .map((t) => t.slice(0, 80))
+    .slice(0, maxTokens);
+}
+
+/**
+ * Filtro «Descripción»: busca en descripción, nombre y especificación; cada palabra
+ * puede coincidir en cualquiera de esos campos (OR entre tokens). Más flexible que
+ * una sola columna y que separar solo por espacio.
+ */
+function addFlexibleDescripcionFilter(
+  parts: string[],
+  params: (string | number | null)[],
+  raw: string
+): void {
+  const tokens = searchTokensDescripcion(raw);
+  if (tokens.length === 0) return;
+  const colExprs = [
+    "IFNULL(p.descripcion,'')",
+    "IFNULL(p.nombre,'')",
+    "IFNULL(p.especificacion,'')",
+  ];
+  const perToken = tokens.map(() => {
+    const ors = colExprs.map((c) => `LOWER(${c}) LIKE ?`).join(" OR ");
+    return `(${ors})`;
+  });
+  parts.push(`(${perToken.join(" OR ")})`);
+  for (const tok of tokens) {
+    for (let i = 0; i < colExprs.length; i++) {
+      params.push(tokenLikeParam(tok));
+    }
+  }
+}
+
 /** Código interno / QR: solo coincidencia exacta (ver `condicionCodigoQrExacta`). */
 function addCodigoCatalogoFilter(
   parts: string[],
@@ -162,7 +205,7 @@ function buildWhere(f: CatalogoFiltrosInput): { sql: string; params: (string | n
   addFlexibleColumnAnyToken(parts, params, "IFNULL(p.codigo_pieza,'')", f.codigo_pieza);
   addFlexibleColumnAnyToken(parts, params, "IFNULL(p.especificacion,'')", f.especificacion);
   addFlexibleColumnAnyToken(parts, params, "IFNULL(p.medida,'')", f.medida);
-  addFlexibleColumnAnyToken(parts, params, "IFNULL(p.descripcion,'')", f.descripcion);
+  addFlexibleDescripcionFilter(parts, params, f.descripcion);
   addFlexibleColumnAnyToken(parts, params, "IFNULL(p.repuesto,'')", f.repuesto);
 
   if (f.stock === "cero") {

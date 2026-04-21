@@ -83,9 +83,13 @@ export function ProductosCatalogo({
             <CatalogoSearchInput
               name="descripcion"
               defaultValue={filtros.descripcion}
-              placeholder="Cualquier palabra alcanza"
+              placeholder="Palabras sueltas; busca también en nombre y especificación"
               className={`${inp} mt-1`}
             />
+            <p className="mt-1 text-[10px] text-slate-500">
+              Separá con espacio, coma, punto, guion, barra, etc. Cualquier término alcanza en descripción, nombre o
+              especificación.
+            </p>
           </div>
           <div>
             <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Repuesto </label>
