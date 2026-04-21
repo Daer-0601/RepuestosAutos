@@ -425,9 +425,13 @@ export function NuevaVentaForm() {
                 name="q"
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
-                placeholder="Nombre, descripción, pieza… (palabras sueltas)"
+                placeholder="Una palabra: flexible. Dos+: todas deben aparecer (en cualquier campo)"
                 className={`${inp} mt-1`}
               />
+              <p className="mt-1 text-[10px] text-slate-500">
+                Misma lógica que admin: cada término puede caer en nombre, pieza, descripción…; con 2 o más términos,
+                tienen que cumplirse todos. Código exacto en su campo.
+              </p>
             </div>
             <div>
               <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Código / QR exacto</label>

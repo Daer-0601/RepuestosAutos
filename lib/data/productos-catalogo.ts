@@ -86,8 +86,8 @@ function tokenLikeParam(t: string): string {
 }
 
 /**
- * Cualquier token alcanza (OR): más permisivo para texto libre.
- * Cada token: LIKE case-insensitive en la misma columna.
+ * Una columna: cada token debe aparecer en esa columna (AND entre tokens).
+ * Una palabra = flexible (LIKE); dos o más = todas obligatorias en ese campo.
  */
 function addFlexibleColumnAnyToken(
   parts: string[],
@@ -97,7 +97,7 @@ function addFlexibleColumnAnyToken(
 ): void {
   const tokens = searchTokens(raw);
   if (tokens.length === 0) return;
-  const inner = tokens.map(() => `LOWER(${colExpr}) LIKE ?`).join(" OR ");
+  const inner = tokens.map(() => `LOWER(${colExpr}) LIKE ?`).join(" AND ");
   parts.push(`(${inner})`);
   for (const tok of tokens) {
     params.push(tokenLikeParam(tok));
@@ -119,9 +119,9 @@ function searchTokensDescripcion(raw: string, maxTokens = 20): string[] {
 }
 
 /**
- * Filtro «Descripción»: busca en descripción, nombre y especificación; cada palabra
- * puede coincidir en cualquiera de esos campos (OR entre tokens). Más flexible que
- * una sola columna y que separar solo por espacio.
+ * Filtro «Descripción»: busca en descripción, nombre y especificación.
+ * Por cada palabra: basta que aparezca en **alguno** de esos campos (OR entre columnas).
+ * Con 2+ palabras: **todas** deben cumplirse (AND entre palabras), igual que «Buscar (todo)».
  */
 function addFlexibleDescripcionFilter(
   parts: string[],
@@ -139,7 +139,7 @@ function addFlexibleDescripcionFilter(
     const ors = colExprs.map((c) => `LOWER(${c}) LIKE ?`).join(" OR ");
     return `(${ors})`;
   });
-  parts.push(`(${perToken.join(" OR ")})`);
+  parts.push(`(${perToken.join(" AND ")})`);
   for (const tok of tokens) {
     for (let i = 0; i < colExprs.length; i++) {
       params.push(tokenLikeParam(tok));
@@ -160,8 +160,9 @@ function addCodigoCatalogoFilter(
 }
 
 /**
- * Búsqueda amplia: cada token en cualquier campo; con varias palabras basta que **alguna** coincida
- * (OR entre tokens). Sin código interno (solo el campo Código del formulario).
+ * Búsqueda amplia (`q`): flexible — cada palabra puede caer en nombre, pieza, descripción, etc.
+ * (OR entre columnas por palabra). Si hay **2 o más palabras**, tienen que cumplirse **todas**
+ * (AND entre palabras). Una sola palabra: como antes. No usa código interno (campo Código).
  */
 function addFlexibleBusquedaAmplia(parts: string[], params: (string | number | null)[], raw: string): void {
   const tokens = searchTokens(raw);
@@ -180,7 +181,7 @@ function addFlexibleBusquedaAmplia(parts: string[], params: (string | number | n
     const ors = colExprs.map((c) => `LOWER(${c}) LIKE ?`).join(" OR ");
     return `(${ors})`;
   });
-  parts.push(`(${perToken.join(" OR ")})`);
+  parts.push(`(${perToken.join(" AND ")})`);
   for (const tok of tokens) {
     for (let i = 0; i < colExprs.length; i++) {
       params.push(tokenLikeParam(tok));

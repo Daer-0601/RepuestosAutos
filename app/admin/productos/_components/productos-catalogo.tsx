@@ -12,6 +12,10 @@ import Link from "next/link";
 const inp =
   "w-full rounded border border-white/10 bg-slate-950/80 px-2 py-1.5 text-xs text-white placeholder:text-slate-600 outline-none focus:border-sky-500/40";
 
+/** Campo «Buscar (todo)»: un poco más compacto que el resto. */
+const inpBuscarTodo =
+  "w-full rounded border border-white/10 bg-slate-950/80 px-1.5 py-1 text-[11px] leading-snug text-white placeholder:text-slate-600 outline-none focus:border-sky-500/40 placeholder:text-[10px]";
+
 export function ProductosCatalogo({
   filtros,
   sucursales,
@@ -27,17 +31,14 @@ export function ProductosCatalogo({
     <div className="space-y-4">
       <form method="get" className="rounded-2xl border border-white/10 bg-slate-900/50 p-4">
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5">
-          <div className="lg:col-span-2">
-            <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Buscar (todo)</label>
+          <div className="max-w-full sm:max-w-md">
+            <label className="text-[9px] font-semibold uppercase tracking-wide text-slate-500">Buscar (todo)</label>
             <CatalogoSearchInput
               name="q"
               defaultValue={filtros.q}
-              placeholder="Palabras sueltas; basta con que una coincida…"
-              className={`${inp} mt-1`}
+              placeholder="Ej. filtro aceite (todas las palabras, cualquier campo)"
+              className={`${inpBuscarTodo} mt-1`}
             />
-            <p className="mt-1 text-[10px] text-slate-500">
-              Espacio, coma o guion. Sin mayúsculas. No busca el código interno del producto.
-            </p>
           </div>
           <div>
             <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Código</label>
@@ -47,16 +48,13 @@ export function ProductosCatalogo({
               placeholder="Ej. 1000 o 001000 (exacto)"
               className={`${inp} mt-1`}
             />
-            <p className="mt-1 text-[10px] text-slate-500">
-              Solo el producto con ese código o QR; si es número, también coincide sin ceros a la izquierda.
-            </p>
           </div>
           <div>
             <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Código pieza</label>
             <CatalogoSearchInput
               name="codigo_pieza"
               defaultValue={filtros.codigo_pieza}
-              placeholder="Cualquier palabra alcanza"
+              placeholder="Varias palabras: todas en código pieza"
               className={`${inp} mt-1`}
             />
           </div>
@@ -65,7 +63,7 @@ export function ProductosCatalogo({
             <CatalogoSearchInput
               name="especificacion"
               defaultValue={filtros.especificacion}
-              placeholder="Cualquier palabra alcanza"
+              placeholder="Varias palabras: todas en especificación"
               className={`${inp} mt-1`}
             />
           </div>
@@ -74,7 +72,7 @@ export function ProductosCatalogo({
             <CatalogoSearchInput
               name="medida"
               defaultValue={filtros.medida}
-              placeholder="Cualquier palabra alcanza"
+              placeholder="Varias palabras: todas en medida"
               className={`${inp} mt-1`}
             />
           </div>
@@ -83,20 +81,16 @@ export function ProductosCatalogo({
             <CatalogoSearchInput
               name="descripcion"
               defaultValue={filtros.descripcion}
-              placeholder="Palabras sueltas; busca también en nombre y especificación"
+              placeholder="Busca en descripción, nombre y especificación"
               className={`${inp} mt-1`}
             />
-            <p className="mt-1 text-[10px] text-slate-500">
-              Separá con espacio, coma, punto, guion, barra, etc. Cualquier término alcanza en descripción, nombre o
-              especificación.
-            </p>
           </div>
           <div>
             <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Repuesto </label>
             <CatalogoSearchInput
               name="repuesto"
               defaultValue={filtros.repuesto}
-              placeholder="Cualquier palabra alcanza"
+              placeholder="Varias palabras: todas en repuesto"
               className={`${inp} mt-1`}
             />
           </div>
