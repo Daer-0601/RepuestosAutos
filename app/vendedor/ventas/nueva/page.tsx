@@ -10,8 +10,9 @@ export default function VendedorNuevaVentaPage() {
   return (
     <PanelSection
       variant="vendedor"
+      wide
       title="Nueva venta"
-      description="Buscá por código o QR, revisá precio y cantidad, confirmá con tipo de pago. El stock baja por lotes FIFO y queda registro en movimientos_inventario."
+      description="Formato tipo salidas: líneas editables, totales abajo; catálogo y escaneo debajo del carrito."
     >
       <NuevaVentaForm />
     </PanelSection>

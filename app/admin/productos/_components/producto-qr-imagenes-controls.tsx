@@ -8,10 +8,9 @@ import { createPortal } from "react-dom";
 const btnQrAction =
   "inline-flex items-center justify-center gap-1.5 rounded-lg border border-white/15 bg-slate-800/90 px-3 py-2 text-xs font-medium text-slate-100 hover:border-sky-500/40 hover:bg-slate-800";
 
-/** Textos fijos del formato etiqueta (imprimir / PNG). Ajustá acá marca y pie. */
-const ETIQUETA_MARCA = "REPUESTOS";
+/** Textos fijos del formato etiqueta (imprimir / PNG). Marca = logo (`public/brand/…`). */
 const ETIQUETA_SUB_DERECHA = "AUTOPARTES";
-const ETIQUETA_FOOTER = "COCHABAMBA";
+const ETIQUETA_LOGO_SRC = "/brand/qr-etiqueta-logo.png";
 
 function etiquetaFechaImpresion(): string {
   return new Date().toLocaleDateString("es-BO", {
@@ -74,6 +73,14 @@ async function downloadQrSheetPng(
     img.src = qrDataUrl;
   });
 
+  const logoImg = new Image();
+  logoImg.crossOrigin = "anonymous";
+  const logoOk = await new Promise<boolean>((resolve) => {
+    logoImg.onload = () => resolve(true);
+    logoImg.onerror = () => resolve(false);
+    logoImg.src = `${window.location.origin}${ETIQUETA_LOGO_SRC}`;
+  });
+
   /** Pegatina compacta (~5,5 cm de ancho al imprimir a 96 dpi). */
   const LABEL_W = 390;
   const PAD = 12;
@@ -103,11 +110,12 @@ async function downloadQrSheetPng(
   const codeH = 16;
   const boxInnerH = boxPad * 2 + descBlockH + 8 + codeH;
   const boxH = Math.max(boxInnerH, 96);
-  const footerH = 12;
   const qrSize = Math.min(rightW - 6, 118);
   const rightBlockH = qrSize + 22;
-  const mainH = Math.max(boxH + footerH + 6, rightBlockH + 4);
-  const topH = 26;
+  const mainH = Math.max(boxH + 6, rightBlockH + 4);
+  const topH = 28;
+  const headerLogoMaxH = 24;
+  const headerLogoMaxW = Math.max(80, Math.floor(innerW * 0.58));
   const decoH = 8;
   const LABEL_H = PAD + topH + decoH + 12 + mainH + PAD;
 
@@ -128,8 +136,14 @@ async function downloadQrSheetPng(
   ctx.fillStyle = "#000000";
   ctx.textAlign = "left";
   ctx.textBaseline = "alphabetic";
-  ctx.font = "900 15px Arial, Helvetica, sans-serif";
-  ctx.fillText(ETIQUETA_MARCA, PAD, y + 14);
+  if (logoOk && logoImg.naturalWidth > 0 && logoImg.naturalHeight > 0) {
+    const scale = Math.min(headerLogoMaxW / logoImg.naturalWidth, headerLogoMaxH / logoImg.naturalHeight);
+    const dw = logoImg.naturalWidth * scale;
+    const dh = logoImg.naturalHeight * scale;
+    const dx = PAD;
+    const dy = PAD + topH - 2 - dh;
+    ctx.drawImage(logoImg, dx, dy, dw, dh);
+  }
   ctx.font = "900 7px Arial, Helvetica, sans-serif";
   ctx.textAlign = "right";
   const sub = ETIQUETA_SUB_DERECHA;
@@ -156,8 +170,6 @@ async function downloadQrSheetPng(
   ctx.font = codeFont;
   ctx.fillText(meta.codigo, boxX + leftW / 2, boxY + boxH - boxPad - 2);
   ctx.textAlign = "left";
-  ctx.font = "700 6px Arial, Helvetica, sans-serif";
-  ctx.fillText(ETIQUETA_FOOTER, PAD, yMain + boxH + 10);
 
   const colRightX = PAD + leftW + COL_GAP;
   const qrX = colRightX + (rightW - qrSize) / 2;
@@ -187,9 +199,8 @@ function printQrWindow(dataUrl: string, modal: { codigo: string; payload: string
   const c = escHtml(modal.codigo);
   const dRaw = modal.descripcion?.trim() || "—";
   const d = escHtml(dRaw.toLocaleUpperCase("es"));
-  const marca = escHtml(ETIQUETA_MARCA);
   const subDer = escHtml(ETIQUETA_SUB_DERECHA);
-  const footer = escHtml(ETIQUETA_FOOTER);
+  const logoSrc = escHtml(`${window.location.origin}${ETIQUETA_LOGO_SRC}`);
   const fecha = escHtml(etiquetaFechaImpresion());
   w.document.open();
   w.document.write(
@@ -220,11 +231,16 @@ function printQrWindow(dataUrl: string, modal: { codigo: string; payload: string
     align-items: flex-end;
     gap: 6px;
   }
-  .marca {
-    font-size: 15px;
-    font-weight: 900;
-    letter-spacing: 0.02em;
-    line-height: 1;
+  .marca-logo {
+    flex: 1;
+    min-width: 0;
+    align-self: flex-end;
+    display: block;
+    max-height: 24px;
+    width: auto;
+    max-width: 100%;
+    object-fit: contain;
+    object-position: left bottom;
   }
   .sub-der {
     font-size: 7px;
@@ -295,12 +311,6 @@ function printQrWindow(dataUrl: string, modal: { codigo: string; payload: string
     font-family: ui-monospace, monospace;
     letter-spacing: 0.02em;
   }
-  .pie-ciudad {
-    margin-top: 7px;
-    font-size: 6px;
-    font-weight: 700;
-    letter-spacing: 0.06em;
-  }
   .qr-img {
     display: block;
     width: 118px;
@@ -323,7 +333,7 @@ function printQrWindow(dataUrl: string, modal: { codigo: string; payload: string
       padding: 2.4mm 2.1mm 2.5mm;
       border-radius: 1.1mm;
     }
-    .marca { font-size: 3.8mm; }
+    .marca-logo { max-height: 6mm; }
     .sub-der { font-size: 2.1mm; max-width: 46%; }
     .deco-line { margin: 1.4mm 0 2mm; }
     .cols { gap: 1.8mm; }
@@ -334,14 +344,13 @@ function printQrWindow(dataUrl: string, modal: { codigo: string; payload: string
     }
     .desc-txt { font-size: 2mm; line-height: 1.3; }
     .codigo-interno { font-size: 2.6mm; margin-top: 1.4mm; }
-    .pie-ciudad { font-size: 1.7mm; margin-top: 1.5mm; }
     .qr-img { width: 20mm; height: 20mm; }
     .fecha { font-size: 2.2mm; margin-top: 0.8mm; }
   }
 </style></head><body>
 <div class="etiqueta">
   <div class="fila-top">
-    <div class="marca">${marca}</div>
+    <img class="marca-logo" src="${logoSrc}" width="200" height="24" alt="" />
     <div class="sub-der">${subDer}</div>
   </div>
   <div class="deco-line" aria-hidden="true"></div>
@@ -351,7 +360,6 @@ function printQrWindow(dataUrl: string, modal: { codigo: string; payload: string
         <div class="desc-txt">${d}</div>
         <div class="codigo-interno">${c}</div>
       </div>
-      <div class="pie-ciudad">${footer}</div>
     </div>
     <div class="col-der">
       <img class="qr-img" src="${dataUrl}" width="118" height="118" alt="Código QR" />

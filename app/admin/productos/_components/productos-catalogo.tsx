@@ -36,7 +36,7 @@ export function ProductosCatalogo({
             <CatalogoSearchInput
               name="q"
               defaultValue={filtros.q}
-              placeholder="Ej. filtro aceite (todas las palabras, cualquier campo)"
+              placeholder="QR, código pieza, espec., medida, nombre, repuesto, descripción, código (una palabra flexible; dos+ repartidas en esos campos)"
               className={`${inpBuscarTodo} mt-1`}
             />
           </div>

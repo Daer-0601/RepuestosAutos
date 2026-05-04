@@ -9,7 +9,7 @@ import type { RowDataPacket } from "mysql2";
 export { CATALOGO_FILAS_DEFAULT, CATALOGO_FILAS_MAX } from "@/lib/catalogo-productos-constants";
 
 export type CatalogoFiltrosInput = {
-  /** Búsqueda amplia: tokens; basta que uno coincida en nombre, pieza, descripción, etc. (no usa código interno). */
+  /** Búsqueda amplia: texto unido del producto + tokens flexibles (ver `addFlexibleBusquedaAmplia`). */
   q: string;
   codigo: string;
   codigo_pieza: string;
@@ -76,6 +76,21 @@ function searchTokens(raw: string, maxTokens = 14): string[] {
     .slice(0, 400)
     .split(/[\s,;-]+/)
     .map((t) => t.replace(/%/g, "").trim())
+    .filter((t) => t.length > 0)
+    .map((t) => t.slice(0, 80))
+    .slice(0, maxTokens);
+}
+
+/**
+ * Tokens para «Buscar (todo)» / `q`: no parte por guiones ni slash, para no trocear códigos OEM/QR;
+ * más separadores suaves y más tokens permitidos que `searchTokens`.
+ */
+function searchTokensAmplia(raw: string, maxTokens = 22): string[] {
+  return raw
+    .trim()
+    .slice(0, 520)
+    .split(/[\s,;:]+/)
+    .map((t) => t.replace(/%/g, "").replace(/[\u200B-\u200D\uFEFF]/g, "").trim())
     .filter((t) => t.length > 0)
     .map((t) => t.slice(0, 80))
     .slice(0, maxTokens);
@@ -160,33 +175,47 @@ function addCodigoCatalogoFilter(
 }
 
 /**
- * Búsqueda amplia (`q`): flexible — cada palabra puede caer en nombre, pieza, descripción, etc.
- * (OR entre columnas por palabra). Si hay **2 o más palabras**, tienen que cumplirse **todas**
- * (AND entre palabras). Una sola palabra: como antes. No usa código interno (campo Código).
+ * Búsqueda amplia (`q`): concatena texto útil del producto y exige que cada token aparezca en ese bloque (más
+ * flexible que exigir cada token en una sola columna). Tokens con `searchTokensAmplia` (no rompe guiones en códigos).
+ * Además, un patrón suelto une trozos con `%` entre espacios, guiones y signos típicos (ej. «ABC 123» vs «ABC-123»).
  */
 function addFlexibleBusquedaAmplia(parts: string[], params: (string | number | null)[], raw: string): void {
-  const tokens = searchTokens(raw);
-  if (tokens.length === 0) return;
+  const normalized = raw.replace(/[\u200B-\u200D\uFEFF]/g, "").trim().slice(0, 520);
+  if (!normalized) return;
 
-  const colExprs = [
-    "IFNULL(p.nombre,'')",
-    "IFNULL(p.codigo_pieza,'')",
-    "IFNULL(p.descripcion,'')",
-    "IFNULL(p.especificacion,'')",
-    "IFNULL(p.medida,'')",
-    "IFNULL(p.repuesto,'')",
-  ];
+  const blob = `LOWER(CONCAT_WS(' ',
+    IFNULL(p.nombre,''),
+    IFNULL(p.codigo,''),
+    IFNULL(p.qr_payload,''),
+    IFNULL(p.codigo_pieza,''),
+    IFNULL(p.descripcion,''),
+    IFNULL(p.especificacion,''),
+    IFNULL(p.medida,''),
+    IFNULL(p.repuesto,''),
+    IFNULL(p.marca_auto,'')))`;
 
-  const perToken = tokens.map(() => {
-    const ors = colExprs.map((c) => `LOWER(${c}) LIKE ?`).join(" OR ");
-    return `(${ors})`;
-  });
-  parts.push(`(${perToken.join(" AND ")})`);
-  for (const tok of tokens) {
-    for (let i = 0; i < colExprs.length; i++) {
+  const branches: string[] = [];
+  const gentleTokens = searchTokensAmplia(normalized);
+  if (gentleTokens.length > 0) {
+    branches.push(`(${gentleTokens.map(() => `${blob} LIKE ?`).join(" AND ")})`);
+    for (const tok of gentleTokens) {
       params.push(tokenLikeParam(tok));
     }
   }
+
+  const loose = normalized
+    .toLowerCase()
+    .replace(/%/g, "")
+    .replace(/[\s,;:\/|._+\-–—()[\]{}'"`´]+/g, "%")
+    .replace(/%+/g, "%")
+    .replace(/^%+|%+$/g, "");
+  if (loose.length >= 2 && loose.includes("%")) {
+    branches.push(`(${blob} LIKE ?)`);
+    params.push(`%${loose}%`);
+  }
+
+  if (branches.length === 0) return;
+  parts.push(branches.length === 1 ? branches[0] : `(${branches.join(" OR ")})`);
 }
 
 function buildWhere(f: CatalogoFiltrosInput): { sql: string; params: (string | number | null)[] } {
@@ -338,12 +367,7 @@ export function stringifyCatalogoFiltros(
   return s ? `?${s}` : "";
 }
 
-export function parseCatalogoFiltros(sp: Record<string, string | string[] | undefined>): CatalogoFiltrosInput {
-  const s = (k: string) => {
-    const v = sp[k];
-    return Array.isArray(v) ? v[0] ?? "" : v ?? "";
-  };
-
+function parseCatalogoFiltrosCore(s: (k: string) => string): CatalogoFiltrosInput {
   const stockRaw = s("stock");
   const stock: CatalogoFiltrosInput["stock"] =
     stockRaw === "cero" || stockRaw === "positivo" ? stockRaw : "";
@@ -374,4 +398,23 @@ export function parseCatalogoFiltros(sp: Record<string, string | string[] | unde
     estado,
     pageSize,
   };
+}
+
+export function parseCatalogoFiltros(sp: Record<string, string | string[] | undefined>): CatalogoFiltrosInput {
+  const s = (k: string) => {
+    const v = sp[k];
+    return Array.isArray(v) ? v[0] ?? "" : v ?? "";
+  };
+  return parseCatalogoFiltrosCore(s);
+}
+
+/** Misma semántica que `parseCatalogoFiltros` pero leyendo un cuerpo JSON (POST). */
+export function parseCatalogoFiltrosFromJsonBody(b: Record<string, unknown>): CatalogoFiltrosInput {
+  const s = (k: string): string => {
+    const v = b[k];
+    if (typeof v === "string") return v.trim();
+    if (typeof v === "number" && Number.isFinite(v)) return String(v);
+    return "";
+  };
+  return parseCatalogoFiltrosCore(s);
 }

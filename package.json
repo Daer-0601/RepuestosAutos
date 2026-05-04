@@ -5,7 +5,7 @@
   "scripts": {
     "db:ping": "node --env-file=.env.local scripts/ping-mysql.mjs",
     "hash-password": "node scripts/hash-password.mjs",
-    "dev": "next dev",
+    "dev": "next dev --webpack",
     "build": "next build",
     "start": "next start",
     "lint": "eslint"

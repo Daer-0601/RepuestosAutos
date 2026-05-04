@@ -8,14 +8,23 @@ export function PanelSection({
   description,
   children,
   variant,
+  wide = false,
 }: {
   title: string;
   description?: string;
   children?: React.ReactNode;
   variant: keyof typeof accents;
+  /** Pantallas densas (p. ej. POS / salidas): más ancho que el panel estándar. */
+  wide?: boolean;
 }) {
   return (
-    <div className="mx-auto max-w-4xl">
+    <div
+      className={
+        wide
+          ? "mx-auto w-full max-w-[min(96rem,calc(100vw-1.25rem))]"
+          : "mx-auto max-w-4xl"
+      }
+    >
       <h1 className="text-2xl font-semibold tracking-tight text-white sm:text-3xl">
         {title}
       </h1>

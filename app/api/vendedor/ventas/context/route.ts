@@ -15,6 +15,7 @@ export async function GET() {
   return NextResponse.json({
     sucursalId: ctx.sucursalId,
     sucursalNombre: ctx.sucursalNombre,
+    username: ctx.username,
     tipoCambio: tc
       ? { id: tc.id, valor_bs_por_usd: tc.valor_bs_por_usd }
       : null,
