@@ -11,9 +11,11 @@ import {
   mergeStocksEnFilas,
   type CatalogoFiltrosInput,
 } from "@/lib/data/productos-catalogo";
-import { getProducto } from "@/lib/data/productos";
+import { getProducto, listProductoImagenes } from "@/lib/data/productos";
 import { getSucursal, listSucursales } from "@/lib/data/sucursales";
 import { sqlInt } from "@/lib/data/sql-utils";
+import { MYSQL_SESSION_OFFSET, formatDateTimeMysqlBolivia } from "@/lib/fecha-bolivia";
+import { rangoPrecioListaTopeBs } from "@/lib/venta-precio-lista-tope-range";
 import type {
   ModoCatalogoVenta,
   ProductoVentaCompletoRow,
@@ -78,6 +80,7 @@ export function parseVentaCatalogoFiltros(
       sucursalStockId: miSucursalId,
       estado: "activo",
       pageSize,
+      pageOffset: 0,
     };
   }
   if (modo === "referencia") {
@@ -87,6 +90,7 @@ export function parseVentaCatalogoFiltros(
       sucursalStockId: null,
       estado: "activo",
       pageSize,
+      pageOffset: 0,
     };
   }
   return {
@@ -95,6 +99,7 @@ export function parseVentaCatalogoFiltros(
     sucursalStockId: null,
     estado: "activo",
     pageSize,
+    pageOffset: 0,
   };
 }
 
@@ -118,6 +123,8 @@ export async function listProductosParaVentaCatalogoJson(input: {
     codigo_pieza: r.codigo_pieza,
     medida: r.medida,
     descripcion: r.descripcion,
+    qr_payload: r.qr_payload ?? "",
+    imagenes_urls: Array.isArray(r.imagenes_urls) ? r.imagenes_urls : [],
     precio_venta_lista_bs: r.precio_venta_lista_bs,
     precio_venta_lista_usd: r.precio_venta_lista_usd,
     punto_tope: r.punto_tope,
@@ -144,7 +151,8 @@ export async function getProductoVentaCompletoPorCodigo(
   if (!frag) return null;
 
   const [prows] = await pool.execute<RowDataPacket[]>(
-    `SELECT p.id, p.codigo, p.nombre, p.precio_venta_lista_bs, p.precio_venta_lista_usd, p.punto_tope
+    `SELECT p.id, p.codigo, p.nombre, p.codigo_pieza, p.medida, p.descripcion, p.qr_payload,
+            p.precio_venta_lista_bs, p.precio_venta_lista_usd, p.punto_tope
      FROM productos p
      WHERE p.estado = 'activo' AND (${frag.sql})`,
     [...frag.params]
@@ -152,6 +160,7 @@ export async function getProductoVentaCompletoPorCodigo(
   if (prows.length !== 1) return null;
   const pr = prows[0] as RowDataPacket;
   const id = Number(pr.id);
+  const imagenes_urls = await listProductoImagenes(id);
 
   const sucursales = (await listSucursales())
     .filter((s) => s.estado === "activo")
@@ -177,6 +186,11 @@ export async function getProductoVentaCompletoPorCodigo(
     id,
     codigo: String(pr.codigo ?? ""),
     nombre: String(pr.nombre ?? ""),
+    codigo_pieza: pr.codigo_pieza != null && String(pr.codigo_pieza).trim() !== "" ? String(pr.codigo_pieza) : null,
+    medida: pr.medida != null && String(pr.medida).trim() !== "" ? String(pr.medida) : null,
+    descripcion: pr.descripcion != null && String(pr.descripcion).trim() !== "" ? String(pr.descripcion) : null,
+    qr_payload: String(pr.qr_payload ?? ""),
+    imagenes_urls,
     precio_venta_lista_bs: strNum(pr.precio_venta_lista_bs as string | null),
     precio_venta_lista_usd: strNum(pr.precio_venta_lista_usd as string | null),
     punto_tope: strNum(pr.punto_tope as string | null),
@@ -274,6 +288,11 @@ export type RegistrarVentaVendedorInput = {
   tipoCambioId: number;
   tipoCambioSnapshot: number;
   numeroDocumento: string | null;
+  /** Comprobante en pantalla / impresión (ej. proforma_1). */
+  tipoNota: string | null;
+  /** Comprador ocasional sin `cliente_id`. */
+  clienteNombreLibre: string | null;
+  clienteNit: string | null;
   lineas: LineaVentaInput[];
   /** Solo aplica si tipoPago = credito (YYYY-MM-DD o null) */
   creditoFechaLimite: string | null;
@@ -329,7 +348,7 @@ async function prepararLineasVenta(
       return { ok: false, message: `Producto #${pid} no existe o está inactivo.` };
     }
 
-    let precioBs =
+    const precioBs =
       line.precioUnitarioBs !== null && Number.isFinite(line.precioUnitarioBs)
         ? round2(line.precioUnitarioBs)
         : round2(strNum(p.precio_venta_lista_bs) ?? NaN);
@@ -337,8 +356,17 @@ async function prepararLineasVenta(
       return { ok: false, message: `Definí precio de venta en Bs para ${p.codigo} (sin lista en catálogo).` };
     }
 
+    const listaPrecio = strNum(p.precio_venta_lista_bs);
     const tope = strNum(p.punto_tope);
-    if (tope !== null && precioBs > tope) {
+    const rango = rangoPrecioListaTopeBs(listaPrecio, tope);
+    if (rango) {
+      if (precioBs < rango.lo || precioBs > rango.hi) {
+        return {
+          ok: false,
+          message: `El precio de ${p.codigo} debe estar entre ${rango.lo.toFixed(2)} y ${rango.hi.toFixed(2)} Bs (lista y tope).`,
+        };
+      }
+    } else if (tope !== null && precioBs > tope) {
       return { ok: false, message: `El precio de ${p.codigo} supera el tope (${tope.toFixed(2)} Bs).` };
     }
 
@@ -431,7 +459,10 @@ export async function registrarVentaVendedor(input: RegistrarVentaVendedorInput)
 
   const conn = await pool.getConnection();
   try {
+    await conn.query(`SET time_zone = '${MYSQL_SESSION_OFFSET}'`);
     await conn.beginTransaction();
+
+    const fechaVentaMysql = formatDateTimeMysqlBolivia(new Date());
 
     const prep = await prepararLineasVenta(conn, input.sucursalId, tc, input.lineas);
     if (!prep.ok) {
@@ -452,16 +483,21 @@ export async function registrarVentaVendedor(input: RegistrarVentaVendedorInput)
 
     const estadoCobro = input.tipoPago === "credito" ? "pendiente" : "cobrado";
 
+    /* Columnas en `ventas`: ver `db/schema_ventas.sql` o migración `db/migrations/001_ventas_tipo_nota_cliente_libre.sql`. */
     const [ventaRes] = await conn.execute<ResultSetHeader>(
       `INSERT INTO ventas (
-        numero_documento, cliente_id, usuario_id, sucursal_id, tipo_pago,
+        numero_documento, tipo_nota, cliente_id, cliente_nombre_libre, cliente_nit,
+        usuario_id, sucursal_id, tipo_pago,
         tipo_cambio_id, tipo_cambio_snapshot,
         subtotal_bs, subtotal_usd, total_bs, total_usd,
         estado, estado_cobro, fecha
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'confirmada', ?, NOW())`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'confirmada', ?, ?)`,
       [
         input.numeroDocumento?.trim() || null,
+        input.tipoNota?.trim() || null,
         input.clienteId && input.clienteId > 0 ? input.clienteId : null,
+        input.clienteNombreLibre?.trim() || null,
+        input.clienteNit?.trim() || null,
         input.usuarioId,
         input.sucursalId,
         input.tipoPago,
@@ -472,6 +508,7 @@ export async function registrarVentaVendedor(input: RegistrarVentaVendedorInput)
         subtotalBs,
         subtotalUsd,
         estadoCobro,
+        fechaVentaMysql,
       ]
     );
     const ventaId = ventaRes.insertId;
@@ -519,15 +556,15 @@ export async function registrarVentaVendedor(input: RegistrarVentaVendedorInput)
       }
 
       await conn.execute(
-        `UPDATE inventario SET stock = stock - ?, actualizado_en = NOW()
+        `UPDATE inventario SET stock = stock - ?, actualizado_en = ?
          WHERE producto_id = ? AND sucursal_id = ?`,
-        [pl.cantidad, pl.productoId, input.sucursalId]
+        [pl.cantidad, fechaVentaMysql, pl.productoId, input.sucursalId]
       );
 
       await conn.execute(
         `INSERT INTO movimientos_inventario (
           producto_id, sucursal_id, tipo, cantidad, referencia_tipo, referencia_id, usuario_id, nota, fecha
-        ) VALUES (?, ?, 'salida', ?, 'venta', ?, ?, ?, NOW())`,
+        ) VALUES (?, ?, 'salida', ?, 'venta', ?, ?, ?, ?)`,
         [
           pl.productoId,
           input.sucursalId,
@@ -535,6 +572,7 @@ export async function registrarVentaVendedor(input: RegistrarVentaVendedorInput)
           ventaId,
           input.usuarioId,
           `Venta #${ventaId}`,
+          fechaVentaMysql,
         ]
       );
     }
@@ -551,8 +589,8 @@ export async function registrarVentaVendedor(input: RegistrarVentaVendedorInput)
       }
       await conn.execute(
         `INSERT INTO creditos (venta_id, monto_total_bs, saldo_pendiente_bs, fecha_inicio, fecha_limite, estado)
-         VALUES (?, ?, ?, CURDATE(), ?, 'pendiente')`,
-        [ventaId, subtotalBs, subtotalBs, fechaLim]
+         VALUES (?, ?, ?, ?, ?, 'pendiente')`,
+        [ventaId, subtotalBs, subtotalBs, fechaVentaMysql.slice(0, 10), fechaLim]
       );
     }
 
@@ -561,7 +599,24 @@ export async function registrarVentaVendedor(input: RegistrarVentaVendedorInput)
   } catch (e) {
     await conn.rollback();
     console.error("registrarVentaVendedor", e);
-    return { ok: false, message: "No se pudo registrar la venta (error de base de datos)." };
+    const sqlMessage =
+      e !== null &&
+      typeof e === "object" &&
+      "sqlMessage" in e &&
+      typeof (e as { sqlMessage?: unknown }).sqlMessage === "string"
+        ? (e as { sqlMessage: string }).sqlMessage
+        : e instanceof Error
+          ? e.message
+          : String(e);
+    let hint = "";
+    if (/unknown column/i.test(sqlMessage)) {
+      hint =
+        " Si falta `tipo_nota`, `cliente_nombre_libre` o `cliente_nit` en la tabla `ventas`, ejecutá el bloque ALTER comentado arriba de `INSERT INTO ventas` en este mismo archivo.";
+    }
+    return {
+      ok: false,
+      message: `No se pudo registrar la venta (base de datos): ${sqlMessage}.${hint}`,
+    };
   } finally {
     conn.release();
   }

@@ -1,6 +1,7 @@
 import { PanelSection } from "@/app/_components/panel-section";
 import { requireVendedorContext } from "@/lib/auth/staff-panel-context";
 import { listVentasPorSucursal } from "@/lib/data/ventas-vendedor";
+import { formatoMostrarFechaHoraBo } from "@/lib/fecha-bolivia";
 import type { Metadata } from "next";
 import Link from "next/link";
 
@@ -47,10 +48,7 @@ export default async function VendedorVentasHistorialPage() {
                 <tr key={r.id} className="text-slate-300">
                   <td className="px-4 py-3 font-mono text-xs text-amber-200/80">{r.id}</td>
                   <td className="px-4 py-3 text-xs text-slate-400">
-                    {new Date(r.fecha).toLocaleString("es-VE", {
-                      dateStyle: "short",
-                      timeStyle: "short",
-                    })}
+                    {new Date(r.fecha).toLocaleString("es-BO", formatoMostrarFechaHoraBo)}
                   </td>
                   <td className="px-4 py-3 capitalize">{r.tipo_pago}</td>
                   <td className="px-4 py-3">{r.estado_cobro}</td>

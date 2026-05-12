@@ -93,6 +93,13 @@ function parseNumOrNull(s: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+/** Total de transporte (Bs) ingresado por el usuario; vacío o inválido = 0. */
+function fleteTotalBsDesdeTexto(s: string): number {
+  const n = parseNumOrNull(s);
+  if (n == null || n < 0) return 0;
+  return round2(n);
+}
+
 function fmt(n: number, d: number): string {
   return d === 2 ? round2(n).toFixed(2) : round4(n).toFixed(4);
 }
@@ -115,6 +122,51 @@ function descripcionTextoParaLinea(
   return n ?? "";
 }
 
+/**
+ * Flete en Bs prorrateado por línea según subtotal Bs de cada ítem.
+ * `fleteTotalBsStr` = costo total de transporte en Bs de toda la mercadería (misma regla que `registrarIngresoCompra` con `fleteTotalBsManual`).
+ */
+function fleteBsPorLineKey(lines: LineState[], tcVal: number, fleteTotalBsStr: string): Record<string, number> {
+  const valid: { key: string; subBs: number }[] = [];
+  for (const line of lines) {
+    if (line.productoId == null) continue;
+    const cant = Math.max(0, Math.trunc(Number(line.cantidad) || 0));
+    const pUsd = parseNumOrNull(line.precioCompraUsd);
+    if (cant < 1 || pUsd == null) continue;
+    const pBs = tcVal > 0 ? round2(pUsd * tcVal) : 0;
+    const subBs = round2(cant * pBs);
+    valid.push({ key: line.key, subBs });
+  }
+  let sumSubBs = 0;
+  for (const v of valid) {
+    sumSubBs = round2(sumSubBs + v.subBs);
+  }
+  const fleteTotal = fleteTotalBsDesdeTexto(fleteTotalBsStr);
+
+  const out: Record<string, number> = {};
+  for (const line of lines) {
+    if (line.productoId != null) out[line.key] = 0;
+  }
+  if (valid.length === 0 || sumSubBs <= 0) {
+    return out;
+  }
+  if (fleteTotal <= 0) {
+    return out;
+  }
+  let allocated = 0;
+  valid.forEach((v, idx) => {
+    let f = 0;
+    if (idx === valid.length - 1) {
+      f = round2(fleteTotal - allocated);
+    } else {
+      f = round2((fleteTotal * v.subBs) / sumSubBs);
+      allocated = round2(allocated + f);
+    }
+    out[v.key] = f;
+  });
+  return out;
+}
+
 /** Anchos iniciales (px); se pueden estirar arrastrando el borde derecho del encabezado. */
 const DEFAULT_INGRESO_COL_WIDTHS = [
   80, 200, 128, 88, 220, 72, 112, 104, 104, 64, 64, 96, 120, 48,
@@ -130,7 +182,7 @@ const INGRESO_COL_LABELS = [
   "P/Compra USD",
   "P/Venta Bs",
   "P/Venta USD",
-  "Flete %",
+  "% transp.",
   "% Util.",
   "P/Tope",
   "Subtotal",
@@ -149,10 +201,9 @@ export function IngresoCompraForm({
   const [sucursalId, setSucursalId] = useState(sucursales[0]?.id ? String(sucursales[0].id) : "");
   const [proveedorNombre, setProveedorNombre] = useState("");
   const [tipoPago, setTipoPago] = useState<string>("efectivo");
-  const [pctFlete, setPctFlete] = useState("0");
+  /** Costo total de transporte (Bs) de toda la mercadería de esta compra; se prorratea entre líneas. */
+  const [fleteTotalBs, setFleteTotalBs] = useState("");
   const [pctUtilidadGlobal, setPctUtilidadGlobal] = useState("0");
-  const [fleteManualActivo, setFleteManualActivo] = useState(false);
-  const [fleteManual, setFleteManual] = useState("");
   const [lines, setLines] = useState<LineState[]>(() => [emptyLine()]);
   const [pending, setPending] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
@@ -238,10 +289,8 @@ export function IngresoCompraForm({
 
     sumSubBs = round2(sumSubBs);
     sumSubUsd = round4(sumSubUsd);
-    const fm = fleteManualActivo ? parseNumOrNull(fleteManual) : null;
-    const pct = Math.min(100, Math.max(0, Number(pctFlete) || 0));
-    const fleteTotal =
-      fm != null && fm >= 0 ? round2(fm) : round2((sumSubBs * pct) / 100);
+    const fleteTotal = fleteTotalBsDesdeTexto(fleteTotalBs);
+    const fleteAlloc = fleteBsPorLineKey(lines, tcVal, fleteTotalBs);
 
     if (valid.length === 0 || sumSubBs <= 0) {
       for (const v of valid) {
@@ -257,19 +306,12 @@ export function IngresoCompraForm({
       return { porKey, sumSubBs, sumSubUsd, fleteTotal, totalBs, totalUsd, qtyTotal };
     }
 
-    let allocated = 0;
-    valid.forEach((v, idx) => {
-      let f = 0;
-      if (idx === valid.length - 1) {
-        f = round2(fleteTotal - allocated);
-      } else {
-        f = round2((fleteTotal * v.subBs) / sumSubBs);
-        allocated = round2(allocated + f);
-      }
+    for (const v of valid) {
+      const f = fleteAlloc[v.key] ?? 0;
       const totBs = round2(v.subBs + f);
       const totUsd = round4(v.subUsd + (tcVal > 0 ? f / tcVal : 0));
       porKey[v.key] = { subBs: v.subBs, subUsd: v.subUsd, flete: f, totBs, totUsd };
-    });
+    }
 
     const totalBs = round2(valid.reduce((s, v) => s + (porKey[v.key]?.totBs ?? 0), 0));
     const totalUsd = round4(valid.reduce((s, v) => s + (porKey[v.key]?.totUsd ?? 0), 0));
@@ -280,22 +322,33 @@ export function IngresoCompraForm({
     }, 0);
 
     return { porKey, sumSubBs, sumSubUsd, fleteTotal, totalBs, totalUsd, qtyTotal };
-  }, [lines, pctFlete, fleteManualActivo, fleteManual, tcVal]);
+  }, [lines, fleteTotalBs, tcVal]);
 
   const itemsValidos = useMemo(
     () => lines.filter((l) => l.productoId != null && parseNumOrNull(l.precioCompraUsd) != null).length,
     [lines]
   );
 
-  /** Aplica % utilidad global al costo unitario Bs de cada línea con producto. */
-  function recalcVentasPorUtilidad(utilStr: string, targetLines: LineState[]): LineState[] {
+  /**
+   * Precio venta lista unitario = costo compra unitario × (1 + %util) + (flete de la línea ÷ cantidad).
+   * El flete total en Bs se prorratea entre líneas según subtotal Bs, igual que en el resumen y en la compra guardada.
+   */
+  function recalcVentasPorUtilidad(
+    utilStr: string,
+    targetLines: LineState[],
+    fleteTotalBsStr: string = fleteTotalBs
+  ): LineState[] {
+    const fleteMap = fleteBsPorLineKey(targetLines, tcVal, fleteTotalBsStr);
     const u = Math.max(0, Number(utilStr) || 0);
     return targetLines.map((line) => {
       if (line.productoId == null) return line;
       const pUsd = parseNumOrNull(line.precioCompraUsd);
       const pBs = pUsd != null && tcVal > 0 ? round2(pUsd * tcVal) : null;
       if (pBs == null || tcVal <= 0) return { ...line, porcentajeUtilidad: utilStr };
-      const ventaBs = round2(pBs * (1 + u / 100));
+      const cant = Math.max(0, Math.trunc(Number(line.cantidad) || 0));
+      const fleteLine = fleteMap[line.key] ?? 0;
+      const fletePorUnidad = cant >= 1 ? round2(fleteLine / cant) : 0;
+      const ventaBs = round2(pBs * (1 + u / 100) + fletePorUnidad);
       const ventaUsd = round4(ventaBs / tcVal);
       return {
         ...line,
@@ -311,33 +364,35 @@ export function IngresoCompraForm({
       const next = prev.map((l) => (l.key === key ? { ...l, ...patch } : l));
       const line = next.find((l) => l.key === key);
       if (!line) return next;
-      const uGlob = Number(pctUtilidadGlobal) || 0;
 
       if ("precioCompraUsd" in patch && line.productoId != null) {
         const pUsd = parseNumOrNull(line.precioCompraUsd);
-        let updated = { ...line };
-        if (pUsd != null && tcVal > 0) {
-          const pBs = round2(pUsd * tcVal);
-          updated.precioCompraBs = fmt(pBs, 2);
-          if (uGlob >= 0) {
-            const ventaBs = round2(pBs * (1 + uGlob / 100));
-            updated.precioVentaBs = fmt(ventaBs, 2);
-            updated.precioVentaUsd = fmt(round4(ventaBs / tcVal), 4);
+        const merged = next.map((l) => {
+          if (l.key !== key) return l;
+          const updated = { ...l };
+          if (pUsd != null && tcVal > 0) {
+            const pBs = round2(pUsd * tcVal);
+            updated.precioCompraBs = fmt(pBs, 2);
+          } else if (pUsd == null) {
+            updated.precioCompraBs = "";
           }
-        } else if (pUsd == null) {
-          updated.precioCompraBs = "";
-        }
-        return next.map((l) => (l.key === key ? updated : l));
+          return updated;
+        });
+        return recalcVentasPorUtilidad(pctUtilidadGlobal, merged);
       }
 
       if ("precioVentaBs" in patch && line.productoId != null) {
         const vBs = parseNumOrNull(line.precioVentaBs);
-        let updated = { ...line };
+        const updated = { ...line };
         if (vBs != null && tcVal > 0) {
           updated.precioVentaUsd = fmt(round4(vBs / tcVal), 4);
           const pBs = parseNumOrNull(line.precioCompraBs);
           if (pBs != null && pBs > 0) {
-            const u = (vBs / pBs - 1) * 100;
+            const cant = Math.max(0, Math.trunc(Number(line.cantidad) || 0));
+            const fleteLine = fleteBsPorLineKey(next, tcVal, fleteTotalBs)[line.key] ?? 0;
+            const fletePu = cant >= 1 ? round2(fleteLine / cant) : 0;
+            const baseVenta = round2(vBs - fletePu);
+            const u = (baseVenta / pBs - 1) * 100;
             updated.porcentajeUtilidad = fmt(round2(u), 2);
           }
         }
@@ -346,13 +401,17 @@ export function IngresoCompraForm({
 
       if ("precioVentaUsd" in patch && line.productoId != null) {
         const vUsd = parseNumOrNull(line.precioVentaUsd);
-        let updated = { ...line };
+        const updated = { ...line };
         if (vUsd != null && tcVal > 0) {
           const vBs = round2(vUsd * tcVal);
           updated.precioVentaBs = fmt(vBs, 2);
           const pBs = parseNumOrNull(line.precioCompraBs);
           if (pBs != null && pBs > 0) {
-            const u = (vBs / pBs - 1) * 100;
+            const cant = Math.max(0, Math.trunc(Number(line.cantidad) || 0));
+            const fleteLine = fleteBsPorLineKey(next, tcVal, fleteTotalBs)[line.key] ?? 0;
+            const fletePu = cant >= 1 ? round2(fleteLine / cant) : 0;
+            const baseVenta = round2(vBs - fletePu);
+            const u = (baseVenta / pBs - 1) * 100;
             updated.porcentajeUtilidad = fmt(round2(u), 2);
           }
         }
@@ -363,13 +422,20 @@ export function IngresoCompraForm({
         const pBs = parseNumOrNull(line.precioCompraBs);
         const uStr = String(line.porcentajeUtilidad).trim().replace(",", ".");
         const uRaw = Number(uStr);
-        let updated = { ...line };
+        const updated = { ...line };
         if (pBs != null && tcVal > 0 && uStr !== "" && Number.isFinite(uRaw)) {
-          const ventaBs = round2(pBs * (1 + uRaw / 100));
+          const cant = Math.max(0, Math.trunc(Number(line.cantidad) || 0));
+          const fleteLine = fleteBsPorLineKey(next, tcVal, fleteTotalBs)[line.key] ?? 0;
+          const fletePu = cant >= 1 ? round2(fleteLine / cant) : 0;
+          const ventaBs = round2(pBs * (1 + uRaw / 100) + fletePu);
           updated.precioVentaBs = fmt(ventaBs, 2);
           updated.precioVentaUsd = fmt(round4(ventaBs / tcVal), 4);
         }
         return next.map((l) => (l.key === key ? updated : l));
+      }
+
+      if ("cantidad" in patch && line.productoId != null && parseNumOrNull(line.precioCompraUsd) != null && tcVal > 0) {
+        return recalcVentasPorUtilidad(pctUtilidadGlobal, next);
       }
 
       return next;
@@ -543,9 +609,11 @@ export function IngresoCompraForm({
           tipoCambioSnapshot: tipoCambio.valor_bs_por_usd,
           numeroDocumento: null,
           observaciones: null,
-          pctFlete: Number(pctFlete) || 0,
-          fleteTotalBsManual:
-            fleteManualActivo && fleteManual.trim() !== "" ? parseNumOrNull(fleteManual) : null,
+          pctFlete: 0,
+          fleteTotalBsManual: (() => {
+            const m = parseNumOrNull(fleteTotalBs);
+            return m != null && m >= 0 ? m : null;
+          })(),
           lineas: payloadLineas,
         }),
       });
@@ -556,10 +624,8 @@ export function IngresoCompraForm({
       }
       setMsg(`Compra #${data.compraId} registrada correctamente.`);
       setLines([emptyLine()]);
-      setPctFlete("0");
+      setFleteTotalBs("");
       setPctUtilidadGlobal("0");
-      setFleteManual("");
-      setFleteManualActivo(false);
     } catch {
       setErr("No se pudo contactar al servidor.");
     } finally {
@@ -698,33 +764,22 @@ export function IngresoCompraForm({
             </div>
             <div className="lg:col-span-2">
               <label className="block text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-                % Flete (s/ subtotal Bs)
+                Transporte total (Bs)
               </label>
               <input
-                value={pctFlete}
-                onChange={(e) => setPctFlete(e.target.value)}
+                value={fleteTotalBs}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setFleteTotalBs(v);
+                  setLines((prev) => recalcVentasPorUtilidad(pctUtilidadGlobal, prev, v));
+                }}
                 className={inpNum}
-                disabled={pending || fleteManualActivo}
+                disabled={pending}
                 inputMode="decimal"
+                placeholder="0"
+                aria-describedby="ingreso-flete-ayuda"
               />
-              <label className="mt-1 flex items-center gap-1.5 text-[10px] text-slate-500">
-                <input
-                  type="checkbox"
-                  checked={fleteManualActivo}
-                  onChange={(e) => setFleteManualActivo(e.target.checked)}
-                  disabled={pending}
-                />
-                Flete Bs fijo
-              </label>
-              {fleteManualActivo ? (
-                <input
-                  value={fleteManual}
-                  onChange={(e) => setFleteManual(e.target.value)}
-                  className={`${inpNum} mt-1`}
-                  disabled={pending}
-                  placeholder="Total Bs"
-                />
-              ) : null}
+              
             </div>
             <div className="lg:col-span-2">
               <label className="block text-[10px] font-semibold uppercase tracking-wide text-slate-500">
@@ -764,7 +819,11 @@ export function IngresoCompraForm({
                     className={`${cellPad} relative select-none ${
                       i === 5 || i === 9 || i === 10 ? "text-center" : ""
                     }`}
-                    title="Arrastrá el borde derecho de la columna para cambiar el ancho"
+                    title={
+                      i === 9
+                        ? "Transporte (flete): parte del costo total de transporte prorrateada a esta línea, expresada como % del subtotal Bs de la línea. Arrastrá el borde derecho para cambiar el ancho."
+                        : "Arrastrá el borde derecho de la columna para cambiar el ancho"
+                    }
                   >
                     {label ? label : <span className="text-slate-600">·</span>}
                     <span
@@ -782,7 +841,6 @@ export function IngresoCompraForm({
             <tbody>
               {lines.map((line) => {
                 const resFila = resumenLineas.porKey[line.key];
-                const cant = Math.trunc(Number(line.cantidad) || 0);
                 const pUsd = parseNumOrNull(line.precioCompraUsd);
                 const pBs = pUsd != null && tcVal > 0 ? round2(pUsd * tcVal) : null;
                 const fletePctSobreCosto =
@@ -1039,7 +1097,8 @@ export function IngresoCompraForm({
               <p className="text-[10px] font-semibold uppercase text-slate-500">Precio total Bs</p>
               <p className="font-mono text-lg text-white">{fmt(resumenLineas.totalBs, 2)}</p>
               <p className="text-[10px] text-slate-500">
-                Subt. {fmt(resumenLineas.sumSubBs, 2)} + flete {fmt(resumenLineas.fleteTotal, 2)}
+                Subt. {fmt(resumenLineas.sumSubBs, 2)} + transporte (flete){" "}
+                {fmt(resumenLineas.fleteTotal, 2)}
               </p>
             </div>
             <div className="text-right">

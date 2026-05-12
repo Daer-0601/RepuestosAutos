@@ -12,7 +12,7 @@ export default function VendedorNuevaVentaPage() {
       variant="vendedor"
       wide
       title="Nueva venta"
-      description="Formato tipo salidas: líneas editables, totales abajo; catálogo y escaneo debajo del carrito."
+      description="Flujo de venta: lector arriba, líneas editables al centro y cierre de cobro abajo. El buscador de catálogo queda aparte para cuando necesités explorar stock."
     >
       <NuevaVentaForm />
     </PanelSection>

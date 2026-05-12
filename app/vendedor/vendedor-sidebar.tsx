@@ -3,6 +3,7 @@
 import { logout } from "@/lib/auth/logout";
 import {
   CreditCard,
+  FileText,
   LayoutDashboard,
   LogOut,
   Menu,
@@ -19,6 +20,7 @@ const nav = [
   { href: "/vendedor", label: "Inicio", icon: LayoutDashboard, exact: true },
   { href: "/vendedor/ventas/nueva", label: "Nueva venta", icon: PlusCircle, exact: true },
   { href: "/vendedor/ventas", label: "Historial ventas", icon: ScrollText, exact: true },
+  { href: "/vendedor/cotizaciones", label: "Cotizaciones", icon: FileText, exact: true },
   { href: "/vendedor/creditos", label: "Créditos", icon: CreditCard, exact: true },
   { href: "/vendedor/productos", label: "Consulta producto", icon: ScanLine, exact: true },
 ] as const;

@@ -13,6 +13,7 @@ import {
   type PeriodoReporte,
 } from "@/lib/data/reportes-admin";
 import { listSucursales } from "@/lib/data/sucursales";
+import { formatoMostrarFechaBo, formatoMostrarFechaHoraBo } from "@/lib/fecha-bolivia";
 import type { Metadata } from "next";
 import Link from "next/link";
 
@@ -36,23 +37,20 @@ function parseCodigoCardex(raw: string | string[] | undefined): string | null {
 function formatFechaHoraVenta(value: string | Date | null | undefined): string {
   if (value == null) return "—";
   if (value instanceof Date) {
-    const hasTime = value.getHours() !== 0 || value.getMinutes() !== 0 || value.getSeconds() !== 0;
-    return hasTime
-      ? value.toLocaleString("es-BO", { dateStyle: "short", timeStyle: "short" })
-      : value.toLocaleDateString("es-BO", { dateStyle: "short" });
+    return value.toLocaleString("es-BO", formatoMostrarFechaHoraBo);
   }
   const s = String(value).trim();
   if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
     const [y, m, d] = s.split("-").map(Number);
-    return new Date(y, m - 1, d).toLocaleDateString("es-BO", { dateStyle: "short" });
+    return new Date(Date.UTC(y, m - 1, d, 12, 0, 0)).toLocaleDateString("es-BO", formatoMostrarFechaBo);
   }
   const normalized = s.includes("T") ? s : s.replace(" ", "T");
   const dt = new Date(normalized);
   if (!Number.isNaN(dt.getTime())) {
     const hasTime = / \d{1,2}:\d{2}/.test(s) || /T\d{2}:\d{2}/.test(normalized);
     return hasTime
-      ? dt.toLocaleString("es-BO", { dateStyle: "short", timeStyle: "short" })
-      : dt.toLocaleDateString("es-BO", { dateStyle: "short" });
+      ? dt.toLocaleString("es-BO", formatoMostrarFechaHoraBo)
+      : dt.toLocaleDateString("es-BO", formatoMostrarFechaBo);
   }
   return s;
 }

@@ -1,5 +1,9 @@
 import { getAdminSession } from "@/lib/auth/admin-session";
 import {
+  catalogoCotizacionBuscarPorTerm,
+  catalogoCotizacionListarActivosPagina,
+} from "@/lib/data/catalogo-cotizacion";
+import {
   countProductosCatalogo,
   listProductosCatalogo,
   parseCatalogoFiltrosFromJsonBody,
@@ -9,11 +13,6 @@ import { CATALOGO_FILAS_MAX } from "@/lib/catalogo-productos-constants";
 import { NextResponse } from "next/server";
 
 const PEDIDO_PAGE_DEFAULT = 80;
-
-/** Si el término parece un QR/código escaneado (largo, alfanumérico), una sola coincidencia exacta basta y no mezclamos ruido LIKE. */
-function termParecePayloadEscaneado(term: string): boolean {
-  return term.length >= 14 && /^[A-Za-z0-9_-]+$/.test(term);
-}
 
 function nz(s: unknown): string {
   return typeof s === "string" ? s.trim() : "";
@@ -52,6 +51,12 @@ export async function POST(request: Request) {
   const perRaw = b.perPage !== undefined ? Number(b.perPage) : PEDIDO_PAGE_DEFAULT;
   const perPage = Number.isFinite(perRaw) && perRaw >= 10 ? sqlInt(Math.trunc(perRaw), CATALOGO_FILAS_MAX) : PEDIDO_PAGE_DEFAULT;
 
+  if (b.listarActivos === true) {
+    const page = Math.max(1, Math.trunc(Number(b.page) || 1));
+    const data = await catalogoCotizacionListarActivosPagina(page, perPage);
+    return NextResponse.json(data);
+  }
+
   if (tieneFiltrosCatalogoAvanzados(b)) {
     const filtros = parseCatalogoFiltrosFromJsonBody({
       ...b,
@@ -78,73 +83,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ productos: [], total: 0 });
   }
 
-  const base: Record<string, unknown> = {
-    perPage,
-    estado: "activo",
-    stock: "",
-    q: "",
-    codigo: "",
-    codigo_pieza: "",
-    especificacion: "",
-    medida: "",
-    descripcion: "",
-    repuesto: "",
-  };
-
-  const filtrosExact = parseCatalogoFiltrosFromJsonBody({ ...base, codigo: term, q: "" });
-  const filtrosPieza = parseCatalogoFiltrosFromJsonBody({ ...base, codigo: "", codigo_pieza: term, q: "" });
-  const filtrosWide = parseCatalogoFiltrosFromJsonBody({ ...base, codigo: "", codigo_pieza: "", q: term });
-
-  const [exactRows, wideTotal, wideRows] = await Promise.all([
-    listProductosCatalogo(filtrosExact),
-    countProductosCatalogo(filtrosWide),
-    listProductosCatalogo(filtrosWide),
-  ]);
-
-  if (termParecePayloadEscaneado(term) && exactRows.length === 1) {
-    const total = await countProductosCatalogo(filtrosExact);
-    const productos = exactRows.map((r) => ({
-      id: r.id,
-      codigo: r.codigo,
-      codigo_pieza: r.codigo_pieza,
-      nombre: r.nombre,
-      medida: r.medida,
-      marca_auto: r.marca_auto,
-      especificacion: r.especificacion,
-      repuesto: r.repuesto,
-    }));
-    return NextResponse.json({ productos, total });
-  }
-
-  const seen = new Set<number>();
-  const rows: Awaited<ReturnType<typeof listProductosCatalogo>> = [];
-  const pushUnique = (list: typeof rows) => {
-    for (const r of list) {
-      if (rows.length >= perPage) return;
-      if (seen.has(r.id)) continue;
-      seen.add(r.id);
-      rows.push(r);
-    }
-  };
-
-  pushUnique(exactRows);
-
-  if (exactRows.length === 0) {
-    const piezaRows = await listProductosCatalogo(filtrosPieza);
-    pushUnique(piezaRows);
-  }
-
-  pushUnique(wideRows);
-
-  let total = wideTotal;
-  if (wideTotal === 0 && rows.length > 0) {
-    total =
-      exactRows.length > 0
-        ? await countProductosCatalogo(filtrosExact)
-        : await countProductosCatalogo(filtrosPieza);
-  }
-
-  const productos = rows.map((r) => ({
+  const { productos, total } = await catalogoCotizacionBuscarPorTerm(term, perPage);
+  const productosPedido = productos.map((r) => ({
     id: r.id,
     codigo: r.codigo,
     codigo_pieza: r.codigo_pieza,
@@ -154,6 +94,5 @@ export async function POST(request: Request) {
     especificacion: r.especificacion,
     repuesto: r.repuesto,
   }));
-
-  return NextResponse.json({ productos, total });
+  return NextResponse.json({ productos: productosPedido, total });
 }

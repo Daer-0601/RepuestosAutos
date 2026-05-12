@@ -24,6 +24,8 @@ export type CatalogoFiltrosInput = {
   estado: "" | "activo" | "inactivo";
   /** Filas por carga (ver `CATALOGO_FILAS_DEFAULT` en `lib/catalogo-productos-constants.ts`). */
   pageSize: number;
+  /** OFFSET SQL para paginar el mismo criterio. */
+  pageOffset: number;
 };
 
 function parseImagenesGroupConcat(raw: string | null | undefined): string[] {
@@ -269,6 +271,7 @@ export async function countProductosCatalogo(f: CatalogoFiltrosInput): Promise<n
 export async function listProductosCatalogo(f: CatalogoFiltrosInput): Promise<ProductoCatalogoRow[]> {
   const { sql, params } = buildWhere(f);
   const lim = sqlInt(f.pageSize, CATALOGO_FILAS_MAX);
+  const off = sqlInt(f.pageOffset ?? 0, 1_000_000);
 
   const [rows] = await pool.execute<RowDataPacket[]>(
     `SELECT p.id, p.codigo, p.qr_payload, p.codigo_pieza, p.especificacion, p.descripcion, p.repuesto, p.procedencia,
@@ -300,7 +303,7 @@ export async function listProductosCatalogo(f: CatalogoFiltrosInput): Promise<Pr
      FROM productos p
      ${sql}
      ORDER BY LOWER(p.nombre) ASC, LOWER(p.codigo) ASC, p.id ASC
-     LIMIT ${lim} OFFSET 0`,
+     LIMIT ${lim} OFFSET ${off}`,
     params
   );
   return (rows as (ProductoCatalogoRow & { imagenes_concat?: string | null })[]).map(
@@ -363,6 +366,7 @@ export function stringifyCatalogoFiltros(
   if (m.estado === "") p.set("estado", "todos");
   else if (m.estado === "inactivo") p.set("estado", "inactivo");
   if (m.pageSize !== CATALOGO_FILAS_DEFAULT) p.set("perPage", String(m.pageSize));
+  if (m.pageOffset > 0) p.set("pageOffset", String(m.pageOffset));
   const s = p.toString();
   return s ? `?${s}` : "";
 }
@@ -385,6 +389,13 @@ function parseCatalogoFiltrosCore(s: (k: string) => string): CatalogoFiltrosInpu
   const pageSize =
     Number.isFinite(perRaw) && perRaw >= 10 ? sqlInt(perRaw, CATALOGO_FILAS_MAX) : CATALOGO_FILAS_DEFAULT;
 
+  const pageOffRaw = Number(s("pageOffset"));
+  /** OFFSET puede ser 0; no usar `sqlInt` (su mínimo es 1 y rompe la primera página). */
+  const pageOffset =
+    Number.isFinite(pageOffRaw) && pageOffRaw >= 0
+      ? Math.min(Math.trunc(pageOffRaw), 1_000_000)
+      : 0;
+
   return {
     q: s("q"),
     codigo: s("codigo"),
@@ -397,6 +408,7 @@ function parseCatalogoFiltrosCore(s: (k: string) => string): CatalogoFiltrosInpu
     sucursalStockId,
     estado,
     pageSize,
+    pageOffset,
   };
 }
 

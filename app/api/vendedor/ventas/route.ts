@@ -8,10 +8,11 @@ import {
 import { revalidatePath } from "next/cache";
 import { NextResponse } from "next/server";
 
-const TIPOS_PAGO: TipoPagoVenta[] = ["efectivo", "qr", "tarjeta", "credito"];
+/** Cobro inmediato en puesto de venta; el crédito se registra en otra sección. */
+const TIPOS_PAGO_VENDEDOR: TipoPagoVenta[] = ["efectivo", "qr", "tarjeta"];
 
-function isTipoPago(s: string): s is TipoPagoVenta {
-  return (TIPOS_PAGO as string[]).includes(s);
+function isTipoPagoVendedor(s: string): s is TipoPagoVenta {
+  return (TIPOS_PAGO_VENDEDOR as string[]).includes(s);
 }
 
 function parseLinea(raw: unknown): LineaVentaInput | null {
@@ -56,8 +57,16 @@ export async function POST(request: Request) {
 
   const b = body as Record<string, unknown>;
   const tipoPagoRaw = typeof b.tipoPago === "string" ? b.tipoPago : "";
-  if (!isTipoPago(tipoPagoRaw)) {
-    return NextResponse.json({ error: "Tipo de pago inválido." }, { status: 400 });
+  if (!isTipoPagoVendedor(tipoPagoRaw)) {
+    return NextResponse.json(
+      {
+        error:
+          tipoPagoRaw === "credito"
+            ? "Las ventas a crédito se gestionan en la sección de créditos, no desde el puesto de venta."
+            : "Tipo de pago inválido.",
+      },
+      { status: 400 }
+    );
   }
 
   const clienteIdRaw = b.clienteId;
@@ -97,6 +106,11 @@ export async function POST(request: Request) {
   const creditoFechaLimite =
     typeof b.creditoFechaLimite === "string" ? b.creditoFechaLimite.trim() || null : null;
 
+  const clienteNombreLibreRaw = typeof b.clienteNombreLibre === "string" ? b.clienteNombreLibre.trim() : "";
+  const clienteNitRaw = typeof b.clienteNit === "string" ? b.clienteNit.trim() : "";
+  const clienteNombreLibre = clienteNombreLibreRaw ? clienteNombreLibreRaw.slice(0, 255) : null;
+  const clienteNit = clienteNitRaw ? clienteNitRaw.slice(0, 64) : null;
+
   const result = await registrarVentaVendedor({
     usuarioId: ctx.userId,
     sucursalId: ctx.sucursalId,
@@ -106,6 +120,9 @@ export async function POST(request: Request) {
     tipoCambioSnapshot,
     numeroDocumento:
       typeof b.numeroDocumento === "string" && b.numeroDocumento.trim() ? b.numeroDocumento.trim() : null,
+    tipoNota: "proforma_1",
+    clienteNombreLibre,
+    clienteNit,
     lineas,
     creditoFechaLimite,
   });

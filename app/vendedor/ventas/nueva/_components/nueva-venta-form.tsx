@@ -1,19 +1,26 @@
 "use client";
 
+import {
+  VentaCarritoTabla,
+  type VentaCarritoLinea,
+  type VentaCarritoProducto,
+} from "@/app/vendedor/ventas/nueva/_components/venta-carrito-tabla";
 import { VentaCatalogoTabla } from "@/app/vendedor/ventas/nueva/_components/venta-catalogo-tabla";
+import { VentaVendedorToolbar } from "@/app/vendedor/ventas/nueva/_components/venta-vendedor-toolbar";
 import { CATALOGO_FILAS_DEFAULT } from "@/lib/catalogo-productos-constants";
+import { rangoPrecioListaTopeBs } from "@/lib/venta-precio-lista-tope-range";
 import type { ModoCatalogoVenta, ProductoVentaCompletoRow, VentaCatalogoApiRow } from "@/lib/types/venta-vendedor-catalogo";
 import {
   CheckCircle2,
   ChevronDown,
   ChevronUp,
+  History,
   Loader2,
   OctagonX,
   Plus,
-  Printer,
-  RotateCcw,
   ScanLine,
-  Trash2,
+  ShoppingBag,
+  X,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -26,32 +33,7 @@ const inp =
 const inpPos =
   "w-full min-w-0 rounded border border-slate-600/80 bg-slate-950/90 px-1.5 py-1 text-[11px] text-slate-100 outline-none focus:border-amber-500/50";
 
-const cellLinea =
-  "border-r border-amber-500/20 px-1.5 py-1 align-middle text-[11px] leading-snug";
-
 type Tc = { id: number; valor_bs_por_usd: number };
-type ClienteOpt = { id: number; nombre: string };
-
-type ProductoLookup = {
-  id: number;
-  codigo: string;
-  nombre: string;
-  /** Texto largo en columna descripción (catálogo o nombre). */
-  descripcionMostrar: string;
-  codigoPieza: string | null;
-  medida: string | null;
-  stock: number;
-  precio_venta_lista_bs: number | null;
-  precio_venta_lista_usd: number | null;
-  punto_tope: number | null;
-};
-
-type LineaCarrito = {
-  key: string;
-  producto: ProductoLookup;
-  cantidad: string;
-  precioUnitBs: string;
-};
 
 function round2(n: number) {
   return Math.round(n * 100) / 100;
@@ -81,32 +63,170 @@ function parsePrecio(s: string, lista: number | null): number | null {
   return Number.isFinite(n) && n > 0 ? round2(n) : null;
 }
 
-function subtotalLineaBs(ln: LineaCarrito): number | null {
+/** Solo dígitos y un separador decimal (coma o punto → un solo punto). */
+function sanitizePrecioUnitBsDigitos(raw: string): string {
+  const s = raw.replace(/,/g, ".");
+  let out = "";
+  let dot = false;
+  for (const ch of s) {
+    if (ch >= "0" && ch <= "9") {
+      out += ch;
+      continue;
+    }
+    if (ch === "." && !dot) {
+      out += ".";
+      dot = true;
+    }
+  }
+  return out;
+}
+
+/** Rango [min, max] entre precio de lista y P. tope (ver `rangoPrecioListaTopeBs`). */
+function precioUnitBsBounds(lista: number | null, tope: number | null): { lo: number | null; hi: number | null } {
+  const interval = rangoPrecioListaTopeBs(lista, tope);
+  if (interval) {
+    return { lo: round2(interval.lo), hi: round2(interval.hi) };
+  }
+  const listaOk =
+    lista != null && Number.isFinite(lista) && lista > 0 ? round2(lista) : null;
+  const topeOk =
+    tope != null && Number.isFinite(tope) && tope > 0 ? round2(tope) : null;
+  if (listaOk != null) return { lo: listaOk, hi: null };
+  if (topeOk != null) return { lo: null, hi: topeOk };
+  return { lo: null, hi: null };
+}
+
+function precioUnitLineaEfectivo(ln: VentaCarritoLinea): number | null {
+  const p = parsePrecio(ln.precioUnitBs, ln.producto.precio_venta_lista_bs);
+  if (p === null) return null;
+  const { lo, hi } = precioUnitBsBounds(ln.producto.precio_venta_lista_bs, ln.producto.punto_tope);
+  let v = p;
+  if (hi != null) v = Math.min(v, hi);
+  if (lo != null) v = Math.max(v, lo);
+  return v;
+}
+
+/** Valor inicial del campo: siempre precio de lista (precioVenta), nunca el tope. */
+function defaultPrecioUnitBsStr(p: { precio_venta_lista_bs: number | null }): string {
+  const lista = p.precio_venta_lista_bs;
+  if (lista != null && Number.isFinite(lista) && lista > 0) {
+    return String(round2(lista));
+  }
+  return "";
+}
+
+/**
+ * Al escribir: solo números y techo (hi); el piso se aplica al salir del campo para poder teclear
+ * valores intermedios (p. ej. pasar de 55 a 60 sin que "6" se convierta en 55 al instante).
+ */
+function clampPrecioUnitBsInput(raw: string, lista: number | null, tope: number | null): string {
+  const cleaned = sanitizePrecioUnitBsDigitos(raw);
+  const t = cleaned.trim();
+  if (t === "" || t === ".") return t;
+
+  if (/^\d+\.$/.test(t)) {
+    return t;
+  }
+
+  const n = Number(t);
+  if (!Number.isFinite(n) || n < 0) return "";
+
+  let v = round2(n);
+  const { hi } = precioUnitBsBounds(lista, tope);
+  if (hi != null) v = Math.min(v, hi);
+  if (v <= 0) return "";
+
+  return String(v);
+}
+
+/** Al blur: ajusta al rango completo [lo, hi]. */
+function snapPrecioUnitBsToRange(raw: string, lista: number | null, tope: number | null): string {
+  const cleaned = sanitizePrecioUnitBsDigitos(raw);
+  const t = cleaned.trim();
+  if (t === "" || t === ".") {
+    return defaultPrecioUnitBsStr({ precio_venta_lista_bs: lista });
+  }
+  const parseT = t.endsWith(".") ? t.slice(0, -1) : t;
+  const n = Number(parseT);
+  if (!Number.isFinite(n) || n <= 0) {
+    return defaultPrecioUnitBsStr({ precio_venta_lista_bs: lista });
+  }
+  let v = round2(n);
+  const { lo, hi } = precioUnitBsBounds(lista, tope);
+  if (hi != null) v = Math.min(v, hi);
+  if (lo != null) v = Math.max(v, lo);
+  return String(v);
+}
+
+function subtotalLineaBs(ln: VentaCarritoLinea): number | null {
   const q = parseQty(ln.cantidad);
   if (q < 1) return null;
-  const p = parsePrecio(ln.precioUnitBs, ln.producto.precio_venta_lista_bs);
+  const p = precioUnitLineaEfectivo(ln);
   if (p === null) return null;
   return round2(q * p);
 }
 
-function mapCompletoToLookup(p: ProductoVentaCompletoRow): ProductoLookup {
+/** Columna «Descripción»: evita repetir código, pieza, QR o el mismo texto que ya va en «Medida». */
+function descripcionMostrarEnLineaVenta(input: {
+  codigo: string;
+  nombre: string;
+  descripcion: string | null | undefined;
+  codigo_pieza: string | null | undefined;
+  medida?: string | null;
+  qr_payload?: string | null;
+}): string {
+  const nombre = input.nombre.trim();
+  const descRaw = (input.descripcion ?? "").trim();
+  if (!descRaw) return nombre;
+  const norm = (s: string) => s.trim().toLowerCase().replace(/\./g, "");
+  const d = norm(descRaw);
+  if (d === norm(nombre)) return nombre;
+  const pieza = (input.codigo_pieza ?? "").trim();
+  if (pieza && d === norm(pieza)) return nombre;
+  const cod = input.codigo.trim();
+  if (cod && d === norm(cod)) return nombre;
+  const qr = (input.qr_payload ?? "").trim();
+  if (qr && d === norm(qr)) return nombre;
+  const med = (input.medida ?? "").trim();
+  if (med && d === norm(med)) return nombre;
+  return descRaw;
+}
+
+function mapCompletoToLookup(p: ProductoVentaCompletoRow): VentaCarritoProducto {
+  const descripcionMostrar = descripcionMostrarEnLineaVenta({
+    codigo: p.codigo,
+    nombre: p.nombre,
+    descripcion: p.descripcion,
+    codigo_pieza: p.codigo_pieza,
+    medida: p.medida,
+    qr_payload: p.qr_payload,
+  });
   return {
     id: p.id,
     codigo: p.codigo,
     nombre: p.nombre,
-    descripcionMostrar: p.nombre,
-    codigoPieza: null,
-    medida: null,
+    descripcionMostrar,
+    codigoPieza: p.codigo_pieza,
+    medida: p.medida,
     stock: p.stockMiSucursal,
     precio_venta_lista_bs: p.precio_venta_lista_bs,
     precio_venta_lista_usd: p.precio_venta_lista_usd,
     punto_tope: p.punto_tope,
+    qrPayload: p.qr_payload?.trim() ? p.qr_payload.trim() : p.codigo,
+    imagenesUrls: Array.isArray(p.imagenes_urls) ? p.imagenes_urls : [],
   };
 }
 
-function mapCatalogRowToLookup(r: VentaCatalogoApiRow, miSucursalId: number): ProductoLookup {
+function mapCatalogRowToLookup(r: VentaCatalogoApiRow, miSucursalId: number): VentaCarritoProducto {
   const stock = r.stocksPorSucursal.find((x) => x.sucursalId === miSucursalId)?.stock ?? 0;
-  const descripcionMostrar = r.descripcion?.trim() ? r.descripcion.trim() : r.nombre;
+  const descripcionMostrar = descripcionMostrarEnLineaVenta({
+    codigo: r.codigo,
+    nombre: r.nombre,
+    descripcion: r.descripcion,
+    codigo_pieza: r.codigo_pieza,
+    medida: r.medida,
+    qr_payload: r.qr_payload,
+  });
   return {
     id: r.id,
     codigo: r.codigo,
@@ -118,6 +238,8 @@ function mapCatalogRowToLookup(r: VentaCatalogoApiRow, miSucursalId: number): Pr
     precio_venta_lista_bs: strNum(r.precio_venta_lista_bs),
     precio_venta_lista_usd: strNum(r.precio_venta_lista_usd),
     punto_tope: strNum(r.punto_tope),
+    qrPayload: (r.qr_payload ?? "").trim() || r.codigo,
+    imagenesUrls: Array.isArray(r.imagenes_urls) ? r.imagenes_urls : [],
   };
 }
 
@@ -128,7 +250,6 @@ export function NuevaVentaForm() {
   const [miSucursalId, setMiSucursalId] = useState(0);
   const [sucursalNombre, setSucursalNombre] = useState("");
   const [tipoCambio, setTipoCambio] = useState<Tc | null>(null);
-  const [clientes, setClientes] = useState<ClienteOpt[]>([]);
 
   const [q, setQ] = useState("");
   const [codigo, setCodigo] = useState("");
@@ -150,19 +271,21 @@ export function NuevaVentaForm() {
   const [buscando, setBuscando] = useState(false);
   const [ultimoScanReferencia, setUltimoScanReferencia] = useState<ProductoVentaCompletoRow | null>(null);
 
-  const [lineas, setLineas] = useState<LineaCarrito[]>([]);
-  const [tipoPago, setTipoPago] = useState<"efectivo" | "qr" | "tarjeta" | "credito">("efectivo");
-  const [clienteId, setClienteId] = useState("");
-  const [creditoFechaLimite, setCreditoFechaLimite] = useState("");
-  const [numeroDocumento, setNumeroDocumento] = useState("");
+  const [lineas, setLineas] = useState<VentaCarritoLinea[]>([]);
+  const [tipoPago, setTipoPago] = useState<"efectivo" | "qr" | "tarjeta">("efectivo");
+  const [clienteNombreLibre, setClienteNombreLibre] = useState("");
+  const [clienteNit, setClienteNit] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [msg, setMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
+  const [ventaConfirmada, setVentaConfirmada] = useState<{
+    ventaId: number;
+    totalBs: string;
+    at: number;
+  } | null>(null);
 
   const [username, setUsername] = useState("");
   const [reloj, setReloj] = useState(() => new Date());
-  /** Solo presentación (no se persiste en venta todavía). */
-  const [tipoDocumentoUi, setTipoDocumentoUi] = useState("venta");
-  const [catalogoExpandido, setCatalogoExpandido] = useState(true);
+  const [catalogoExpandido, setCatalogoExpandido] = useState(false);
 
   const loadContext = useCallback(async () => {
     setLoadingCtx(true);
@@ -178,7 +301,6 @@ export function NuevaVentaForm() {
         sucursalNombre?: string;
         username?: string;
         tipoCambio?: Tc | null;
-        clientes?: ClienteOpt[];
         error?: string;
       };
       if (!res.ok) {
@@ -189,7 +311,6 @@ export function NuevaVentaForm() {
       setSucursalNombre(data.sucursalNombre ?? "");
       setUsername(data.username ?? "");
       setTipoCambio(data.tipoCambio ?? null);
-      setClientes(Array.isArray(data.clientes) ? data.clientes : []);
     } catch {
       setCtxError("Error de red al cargar datos.");
     } finally {
@@ -206,6 +327,23 @@ export function NuevaVentaForm() {
     return () => clearInterval(id);
   }, []);
 
+  useEffect(() => {
+    if (!ventaConfirmada) return;
+    const { ventaId, totalBs, at } = ventaConfirmada;
+    if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+      try {
+        new Notification("Venta confirmada", {
+          body: `Venta #${ventaId} · ${totalBs} Bs`,
+          tag: `venta-ok-${ventaId}-${at}`,
+        });
+      } catch {
+        /* navegador puede bloquear notificaciones */
+      }
+    }
+    const t = window.setTimeout(() => setVentaConfirmada(null), 10000);
+    return () => window.clearTimeout(t);
+  }, [ventaConfirmada]);
+
   const tcVal = tipoCambio?.valor_bs_por_usd ?? 0;
 
   const fechaHoraStr = useMemo(() => {
@@ -221,7 +359,7 @@ export function NuevaVentaForm() {
     for (const ln of lineas) {
       const q = parseQty(ln.cantidad);
       if (q < 1) continue;
-      const p = parsePrecio(ln.precioUnitBs, ln.producto.precio_venta_lista_bs);
+      const p = precioUnitLineaEfectivo(ln);
       if (p === null) continue;
       bs = round2(bs + q * p);
       if (tcVal > 0) {
@@ -231,7 +369,18 @@ export function NuevaVentaForm() {
     return { bs, usd };
   }, [lineas, tcVal]);
 
-  function agregarAlCarrito(p: ProductoLookup) {
+  function imprimirFacturaVenta() {
+    if (lineas.length === 0) return;
+    document.documentElement.classList.add("print-solo-factura-venta");
+    const quitarClase = () => {
+      document.documentElement.classList.remove("print-solo-factura-venta");
+    };
+    window.addEventListener("afterprint", quitarClase, { once: true });
+    window.setTimeout(quitarClase, 5000);
+    window.print();
+  }
+
+  function agregarAlCarrito(p: VentaCarritoProducto) {
     setUltimoScanReferencia(null);
     setLineas((prev) => {
       const idx = prev.findIndex((l) => l.producto.id === p.id);
@@ -240,7 +389,14 @@ export function NuevaVentaForm() {
         const cur = parseQty(copy[idx].cantidad);
         const max = p.stock;
         const next = Math.min(max, cur + 1);
-        copy[idx] = { ...copy[idx], producto: p, cantidad: String(Math.max(1, next)) };
+        const prevPrecio = copy[idx].precioUnitBs.trim();
+        copy[idx] = {
+          ...copy[idx],
+          producto: p,
+          cantidad: String(Math.max(1, next)),
+          precioUnitBs:
+            prevPrecio === "" ? defaultPrecioUnitBsStr(p) : copy[idx].precioUnitBs,
+        };
         return copy;
       }
       return [
@@ -249,7 +405,7 @@ export function NuevaVentaForm() {
           key: typeof crypto !== "undefined" ? crypto.randomUUID() : String(Math.random()),
           producto: p,
           cantidad: "1",
-          precioUnitBs: "",
+          precioUnitBs: defaultPrecioUnitBsStr(p),
         },
       ];
     });
@@ -310,7 +466,6 @@ export function NuevaVentaForm() {
       return;
     }
     agregarAlCarrito(p);
-    setMsg({ type: "ok", text: `${p.codigo} agregado al carrito.` });
   }
 
   async function buscarProducto(e: React.FormEvent) {
@@ -346,7 +501,6 @@ export function NuevaVentaForm() {
       }
       agregarAlCarrito(mapCompletoToLookup(p));
       setCodigoBuscar("");
-      setMsg({ type: "ok", text: `${p.codigo} agregado al carrito.` });
     } catch {
       setMsg({ type: "err", text: "Error de red al buscar." });
     } finally {
@@ -365,14 +519,6 @@ export function NuevaVentaForm() {
       setMsg({ type: "err", text: "Agregá productos al carrito." });
       return;
     }
-    if (tipoPago === "credito") {
-      const cid = Number(clienteId);
-      if (!Number.isFinite(cid) || cid < 1) {
-        setMsg({ type: "err", text: "Elegí un cliente para venta a crédito." });
-        return;
-      }
-    }
-
     const payloadLineas = [];
     for (const ln of lineas) {
       const q = parseQty(ln.cantidad);
@@ -396,6 +542,23 @@ export function NuevaVentaForm() {
         setMsg({ type: "err", text: `${ln.producto.codigo} no tiene precio de lista; ingresá precio manual.` });
         return;
       }
+      const precioFinal = precioExplicit ?? precioLista;
+      const tope = ln.producto.punto_tope;
+      const { lo, hi } = precioUnitBsBounds(precioLista, tope);
+      if (precioFinal != null && lo != null && precioFinal < lo) {
+        setMsg({
+          type: "err",
+          text: `${ln.producto.codigo}: el precio debe ser al menos ${lo.toFixed(2)} Bs (rango con lista y tope).`,
+        });
+        return;
+      }
+      if (precioFinal != null && hi != null && precioFinal > hi) {
+        setMsg({
+          type: "err",
+          text: `${ln.producto.codigo}: el precio no puede superar ${hi.toFixed(2)} Bs (rango con lista y tope).`,
+        });
+        return;
+      }
       payloadLineas.push({
         productoId: ln.producto.id,
         cantidad: q,
@@ -410,11 +573,13 @@ export function NuevaVentaForm() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           tipoPago,
-          clienteId: clienteId.trim() !== "" ? Number(clienteId) : null,
+          clienteId: null,
           tipoCambioId: tipoCambio.id,
           tipoCambioSnapshot: tipoCambio.valor_bs_por_usd,
-          numeroDocumento: numeroDocumento.trim() || null,
-          creditoFechaLimite: tipoPago === "credito" ? creditoFechaLimite.trim() || null : null,
+          numeroDocumento: null,
+          clienteNombreLibre: clienteNombreLibre.trim() || null,
+          clienteNit: clienteNit.trim() || null,
+          creditoFechaLimite: null,
           lineas: payloadLineas,
         }),
       });
@@ -423,10 +588,21 @@ export function NuevaVentaForm() {
         setMsg({ type: "err", text: data.error ?? "No se pudo registrar la venta." });
         return;
       }
-      setMsg({ type: "ok", text: `Venta #${data.ventaId} registrada.` });
+      const vid = data.ventaId;
+      if (vid == null || !Number.isFinite(vid)) {
+        setMsg({ type: "err", text: "Respuesta inválida del servidor." });
+        return;
+      }
+      setMsg(null);
+      imprimirFacturaVenta();
+      setVentaConfirmada({
+        ventaId: vid,
+        totalBs: totales.bs.toFixed(2),
+        at: Date.now(),
+      });
       setLineas([]);
-      setNumeroDocumento("");
-      setCreditoFechaLimite("");
+      setClienteNombreLibre("");
+      setClienteNit("");
       setUltimoScanReferencia(null);
       void ejecutarBusquedaCatalogo();
       router.refresh();
@@ -439,358 +615,413 @@ export function NuevaVentaForm() {
 
   if (loadingCtx) {
     return (
-      <div className="flex items-center gap-2 text-sm text-slate-400">
-        <Loader2 className="h-4 w-4 animate-spin text-amber-400/90" />
-        Cargando sucursal y tipo de cambio…
+      <div className="flex flex-col items-center justify-center gap-3 rounded-2xl border border-white/10 bg-slate-950/40 py-16 text-slate-400">
+        <Loader2 className="h-8 w-8 animate-spin text-amber-400/90" />
+        <p className="text-sm">Preparando tu puesto de venta…</p>
       </div>
     );
   }
 
   if (ctxError) {
-    return <p className="text-sm text-rose-200">{ctxError}</p>;
+    return (
+      <div className="rounded-xl border border-rose-500/35 bg-rose-950/30 px-4 py-3 text-sm text-rose-100" role="alert">
+        {ctxError}
+      </div>
+    );
   }
 
+  const tcBs = tipoCambio?.valor_bs_por_usd ?? null;
+
   return (
-    <div className="space-y-4 text-slate-300">
-      <div className="rounded-lg border-2 border-amber-600/45 bg-slate-950/80 shadow-inner shadow-black/40">
-        <div className="grid min-h-[92px] gap-2 border-b border-amber-700/30 p-2 sm:grid-cols-[minmax(96px,1fr)_auto_minmax(128px,1.1fr)] sm:items-stretch">
-          <div className="flex min-h-[64px] items-center justify-center border border-amber-800/40 bg-black/40 px-2 py-2">
-            <span className="max-w-full text-center text-lg font-bold uppercase leading-tight text-red-400 sm:text-xl">
-              {sucursalNombre || "—"}
-            </span>
-          </div>
-          <div className="flex flex-col items-center justify-center px-3 py-2">
-            <span className="text-2xl font-black tracking-[0.18em] text-amber-100 drop-shadow-sm sm:text-3xl">
-              SALIDAS
-            </span>
-            <span className="mt-0.5 font-mono text-[10px] text-slate-500">Sucursal #{miSucursalId}</span>
-          </div>
-          <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 border border-slate-700/60 bg-slate-900/60 p-2 text-[10px] uppercase leading-tight">
-            <span className="text-slate-500">Usuario</span>
-            <span className="truncate text-right font-mono text-amber-100/90 normal-case">{username || "—"}</span>
-            <span className="text-slate-500">Fecha</span>
-            <span className="text-right font-mono normal-case">{fechaHoraStr.fecha}</span>
-            <span className="text-slate-500">Hora</span>
-            <span className="text-right font-mono normal-case">{fechaHoraStr.hora}</span>
-            <span className="text-slate-500">Tipo cambio</span>
-            <span className="text-right font-mono normal-case">
-              {tipoCambio ? `${tipoCambio.valor_bs_por_usd.toFixed(2)} Bs/USD` : "Sin TC"}
-            </span>
-          </div>
-        </div>
-      </div>
+    <div>
+      <div className="space-y-6 text-slate-300">
+      <VentaVendedorToolbar
+        sucursalNombre={sucursalNombre}
+        miSucursalId={miSucursalId}
+        username={username}
+        tipoCambioBsPorUsd={tcBs}
+        fechaStr={fechaHoraStr.fecha}
+        horaStr={fechaHoraStr.hora}
+      />
 
       {msg ? (
-        <p
-          className={`rounded-xl border px-4 py-3 text-sm ${
+        <div
+          className={`flex gap-3 rounded-xl border px-4 py-3 text-sm leading-relaxed ${
             msg.type === "ok"
-              ? "border-emerald-500/30 bg-emerald-950/35 text-emerald-100"
-              : "border-rose-500/30 bg-rose-950/40 text-rose-100"
+              ? "border-emerald-500/35 bg-emerald-950/30 text-emerald-50"
+              : "border-rose-500/35 bg-rose-950/35 text-rose-50"
           }`}
-          role="alert"
+          role="status"
         >
-          {msg.type === "ok" ? <CheckCircle2 className="mb-1 inline h-4 w-4 align-text-bottom opacity-90" /> : null}{" "}
-          {msg.text}
-        </p>
+          {msg.type === "ok" ? (
+            <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-400/90" aria-hidden />
+          ) : (
+            <span className="mt-0.5 h-5 w-5 shrink-0 rounded-full bg-rose-500/40" aria-hidden />
+          )}
+          <p>{msg.text}</p>
+        </div>
       ) : null}
 
-      <form onSubmit={confirmarVenta} className="space-y-3">
-        <div className="rounded-lg border border-amber-700/35 bg-slate-950/50 p-2">
-          <div className="grid gap-2 sm:grid-cols-12">
-            <div className="sm:col-span-2">
-              <label className="block text-[9px] font-bold uppercase text-slate-500">Tipo doc.</label>
-              <select
-                value={tipoDocumentoUi}
-                onChange={(e) => setTipoDocumentoUi(e.target.value)}
-                className={`${inpPos} mt-0.5`}
+      {ventaConfirmada ? (
+        <div
+          className="fixed bottom-5 right-5 z-[200] w-[min(100vw-2.5rem,22rem)] overflow-hidden rounded-2xl border border-emerald-500/40 bg-slate-950/95 shadow-[0_20px_50px_-12px_rgba(0,0,0,0.65)] shadow-emerald-900/20 ring-1 ring-white/10 backdrop-blur-md"
+          role="alert"
+          aria-live="polite"
+        >
+          <div className="flex items-start gap-3 border-b border-emerald-500/25 bg-emerald-950/40 px-4 py-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-500/20 text-emerald-300">
+              <CheckCircle2 className="h-6 w-6" strokeWidth={2} aria-hidden />
+            </div>
+            <div className="min-w-0 flex-1 pt-0.5">
+              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-emerald-200/90">Venta confirmada</p>
+              <p className="mt-1 font-mono text-lg font-semibold tabular-nums text-white">
+                #{ventaConfirmada.ventaId}
+              </p>
+              <p className="mt-0.5 font-mono text-sm text-emerald-100/90">{ventaConfirmada.totalBs} Bs</p>
+            </div>
+            <button
+              type="button"
+              className="shrink-0 rounded-lg p-1.5 text-slate-400 transition hover:bg-white/10 hover:text-white"
+              aria-label="Cerrar aviso"
+              onClick={() => setVentaConfirmada(null)}
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 px-4 py-3">
+            <Link
+              href="/vendedor/ventas"
+              className="inline-flex items-center rounded-lg bg-emerald-500/90 px-3 py-1.5 text-xs font-medium text-slate-950 transition hover:bg-emerald-400"
+            >
+              Ver historial
+            </Link>
+            {typeof Notification !== "undefined" && Notification.permission === "default" ? (
+              <button
+                type="button"
+                className="text-xs text-slate-400 underline decoration-slate-500/60 underline-offset-2 hover:text-slate-200"
+                onClick={async () => {
+                  try {
+                    await Notification.requestPermission();
+                  } catch {
+                    /* vacío */
+                  }
+                }}
               >
-                <option value="venta">Venta</option>
-                <option value="presupuesto">Presupuesto</option>
-                <option value="nota">Nota</option>
-              </select>
-            </div>
-            <div className="sm:col-span-2">
-              <label className="block text-[9px] font-bold uppercase text-slate-500">Nº doc. / ref.</label>
-              <input
-                className={`${inpPos} mt-0.5 font-mono`}
-                value={numeroDocumento}
-                onChange={(e) => setNumeroDocumento(e.target.value)}
-              />
-            </div>
-            <div className="sm:col-span-4">
-              <label className="block text-[9px] font-bold uppercase text-slate-500">Nombre cliente</label>
-              <select
-                className={`${inpPos} mt-0.5`}
-                value={clienteId}
-                onChange={(e) => setClienteId(e.target.value)}
-                required={tipoPago === "credito"}
-              >
-                <option value="">—</option>
-                {clientes.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.nombre}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="flex items-end sm:col-span-2">
-              <label className="flex cursor-pointer items-center gap-2 rounded border border-slate-600/70 bg-slate-900/80 px-2 py-1.5 text-[11px]">
-                <input
-                  type="checkbox"
-                  className="accent-amber-500"
-                  checked={tipoPago === "credito"}
-                  onChange={(e) => {
-                    if (e.target.checked) setTipoPago("credito");
-                    else setTipoPago("efectivo");
-                  }}
-                />
-                Crédito
-              </label>
-            </div>
-            <div className="sm:col-span-2">
-              <label className="block text-[9px] font-bold uppercase text-slate-500">Forma pago</label>
-              <select
-                className={`${inpPos} mt-0.5`}
-                value={tipoPago}
-                onChange={(e) => setTipoPago(e.target.value as typeof tipoPago)}
-              >
-                <option value="efectivo">Efectivo</option>
-                <option value="qr">QR</option>
-                <option value="tarjeta">Tarjeta</option>
-                <option value="credito">Crédito</option>
-              </select>
+                Permitir avisos del sistema
+              </button>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+
+      {/* Datos del cobro (arriba del lector para ver forma de pago antes de escanear) */}
+      <section className="rounded-2xl border border-white/10 bg-slate-950/45 p-4 sm:p-5">
+        <h2 className="text-base font-semibold text-white">Datos del cobro</h2>
+        <p className="mt-1 text-xs text-slate-500">
+          Solo cobro inmediato (efectivo, QR o tarjeta). Ventas a crédito y cuentas de cliente van en la sección de
+          créditos. El tipo mostrado es referencia en pantalla e impresión.
+        </p>
+        <div className="mt-4 flex min-w-0 flex-nowrap items-center gap-x-3 gap-y-0 overflow-x-auto pb-1 sm:gap-x-4">
+          <div className="flex shrink-0 items-center gap-2">
+            <span className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+              Tipo (nota)
+            </span>
+            <span
+              className={`${inp} inline-flex cursor-default items-center border-white/15 bg-slate-900/60 py-1.5 pl-2 pr-2.5 font-mono text-slate-200`}
+              title="Tipo fijo para esta pantalla"
+            >
+              proforma_1
+            </span>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <label
+              htmlFor="venta-tipo-pago"
+              className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide text-slate-500"
+            >
+              Forma de pago
+            </label>
+            <select
+              id="venta-tipo-pago"
+              className={`${inp} w-auto min-w-[7.5rem]`}
+              value={tipoPago}
+              onChange={(e) => setTipoPago(e.target.value as typeof tipoPago)}
+            >
+              <option value="efectivo">Efectivo</option>
+              <option value="qr">QR</option>
+              <option value="tarjeta">Tarjeta</option>
+            </select>
+          </div>
+          <div className="flex min-w-[12rem] max-w-md flex-1 items-center gap-2">
+            <label
+              htmlFor="venta-cliente-nombre"
+              className="shrink-0 whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide text-slate-500"
+            >
+              Nombre del cliente <span className="font-normal normal-case text-slate-600">(opcional)</span>
+            </label>
+            <input
+              id="venta-cliente-nombre"
+              className={`${inp} min-w-[8rem] flex-1`}
+              value={clienteNombreLibre}
+              onChange={(e) => setClienteNombreLibre(e.target.value)}
+              placeholder="Ej. razón social o nombre"
+              autoComplete="name"
+            />
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <label
+              htmlFor="venta-cliente-nit"
+              className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide text-slate-500"
+            >
+              NIT <span className="font-normal normal-case text-slate-600">(opcional)</span>
+            </label>
+            <input
+              id="venta-cliente-nit"
+              className={`${inp} w-[7.5rem] min-w-[7rem] font-mono sm:w-36`}
+              value={clienteNit}
+              onChange={(e) => setClienteNit(e.target.value)}
+              placeholder="NIT"
+              autoComplete="off"
+            />
+          </div>
+        </div>
+      </section>
+
+      {/* 1 · Entrada rápida (lector / teclado) */}
+      <section className="rounded-2xl border border-amber-500/25 bg-gradient-to-b from-amber-500/[0.07] to-slate-950/40 p-4 sm:p-5">
+        <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h2 className="text-base font-semibold text-white">Agregar con código o QR</h2>
+            <p className="mt-1 max-w-2xl text-xs text-slate-500">
+              Enfocá el cursor acá, escaneá o pegá el código y pulsá Enter. Solo suma líneas si hay stock en tu
+              sucursal.
+            </p>
+          </div>
+          <Link
+            href="/vendedor/ventas"
+            className="inline-flex shrink-0 items-center gap-2 self-start rounded-lg border border-white/10 px-3 py-2 text-xs font-medium text-slate-300 transition hover:border-amber-500/30 hover:text-white"
+          >
+            <History className="h-3.5 w-3.5 text-amber-400/80" />
+            Ver historial
+          </Link>
+        </div>
+        <form onSubmit={buscarProducto} className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-stretch">
+          <div className="relative min-w-0 flex-1">
+            <ScanLine
+              className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-amber-400/60"
+              aria-hidden
+            />
+            <input
+              className={`${inp} h-12 rounded-xl border-amber-500/25 bg-slate-950/90 pl-12 pr-4 text-sm shadow-inner shadow-black/30 placeholder:text-slate-600 focus:border-amber-500/50`}
+              value={codigoBuscar}
+              onChange={(e) => setCodigoBuscar(e.target.value)}
+              placeholder="Código interno, QR o referencia…"
+              autoComplete="off"
+              autoFocus
+            />
+          </div>
+          <button
+            type="submit"
+            disabled={buscando || !codigoBuscar.trim()}
+            className="inline-flex h-12 shrink-0 items-center justify-center gap-2 rounded-xl bg-amber-500 px-6 text-sm font-semibold text-slate-950 shadow-lg shadow-amber-900/20 transition hover:bg-amber-400 disabled:pointer-events-none disabled:opacity-40"
+          >
+            {buscando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" strokeWidth={2.5} />}
+            Agregar
+          </button>
+        </form>
+
+        {ultimoScanReferencia ? (
+          <div className="mt-4 rounded-xl border border-amber-500/30 bg-slate-950/60 p-4 text-sm">
+            <p className="font-medium text-amber-100">
+              {ultimoScanReferencia.codigo}
+              <span className="font-normal text-slate-500"> — sin stock en tu sucursal; referencia por depósito</span>
+            </p>
+            <p className="mt-1 font-mono text-xs text-slate-500">
+              Lista Bs {ultimoScanReferencia.precio_venta_lista_bs?.toFixed(2) ?? "—"} · Tope{" "}
+              {ultimoScanReferencia.punto_tope?.toFixed(2) ?? "—"}
+            </p>
+            <ul className="mt-3 grid gap-1.5 sm:grid-cols-2 lg:grid-cols-3">
+              {ultimoScanReferencia.porSucursal.map((s) => (
+                <li
+                  key={s.sucursalId}
+                  className={`flex items-center justify-between gap-2 rounded-lg border px-2.5 py-1.5 font-mono text-xs ${
+                    s.sucursalId === miSucursalId
+                      ? "border-amber-500/40 bg-amber-500/10 text-amber-50"
+                      : "border-white/10 text-slate-400"
+                  }`}
+                >
+                  <span className="min-w-0 truncate">{s.sucursalNombre}</span>
+                  <span className={s.stock > 0 ? "text-emerald-300" : "text-slate-600"}>{s.stock}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+      </section>
+
+      {/* 2 · Carrito */}
+      <section className="space-y-3">
+        <div className="flex flex-wrap items-end justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <ShoppingBag className="h-5 w-5 text-amber-400/90" aria-hidden />
+            <div>
+              <h2 className="text-base font-semibold text-white">Líneas de esta venta</h2>
+              <p className="text-xs text-slate-500">
+                Ajustá cantidades y precio en Bs si hace falta. El precio se carga con lista; solo números; debe quedar
+                entre el menor y el mayor de <span className="text-slate-400">precioVenta</span> (lista) y{" "}
+                <span className="text-slate-400">P. tope</span>. Al salir del campo, el valor se ajusta a ese rango.
+                Las columnas se redimensionan arrastrando el borde.
+              </p>
             </div>
           </div>
-          {tipoPago === "credito" ? (
-            <div className="mt-2 max-w-xs">
-              <label className="block text-[9px] font-bold uppercase text-slate-500">Fecha límite crédito</label>
-              <input
-                type="date"
-                className={`${inpPos} mt-0.5`}
-                value={creditoFechaLimite}
-                onChange={(e) => setCreditoFechaLimite(e.target.value)}
-              />
-            </div>
-          ) : null}
+          <p className="rounded-full border border-white/10 bg-slate-950/80 px-3 py-1 font-mono text-xs text-slate-400">
+            {lineas.length === 0 ? "Vacío" : `${lineas.length} ítem${lineas.length === 1 ? "" : "s"}`}
+          </p>
         </div>
+        <VentaCarritoTabla
+          lineas={lineas}
+          inpPosClass={inpPos}
+          subtotalLineaBs={subtotalLineaBs}
+          onCantidadChange={(key, value) =>
+            setLineas((prev) => prev.map((x) => (x.key === key ? { ...x, cantidad: value } : x)))
+          }
+          onPrecioChange={(key, value) =>
+            setLineas((prev) =>
+              prev.map((x) =>
+                x.key === key
+                  ? {
+                      ...x,
+                      precioUnitBs: clampPrecioUnitBsInput(
+                        value,
+                        x.producto.precio_venta_lista_bs,
+                        x.producto.punto_tope
+                      ),
+                    }
+                  : x
+              )
+            )
+          }
+          onPrecioBlur={(key) =>
+            setLineas((prev) =>
+              prev.map((x) =>
+                x.key === key
+                  ? {
+                      ...x,
+                      precioUnitBs: snapPrecioUnitBsToRange(
+                        x.precioUnitBs,
+                        x.producto.precio_venta_lista_bs,
+                        x.producto.punto_tope
+                      ),
+                    }
+                  : x
+              )
+            )
+          }
+          onRemove={(key) => setLineas((prev) => prev.filter((x) => x.key !== key))}
+        />
+      </section>
 
-        <div className="overflow-x-auto rounded-lg border border-amber-700/35 bg-slate-950/60">
-          <table className="w-max min-w-full border-collapse text-left">
-            <thead className="border-b border-amber-600/40 bg-slate-900/95 text-[9px] font-bold uppercase tracking-tight text-slate-500">
-              <tr>
-                <th className={`${cellLinea} w-7 text-center`} title="Quitar">
-                  {" "}
-                </th>
-                <th className={`${cellLinea} min-w-[72px]`}>Código</th>
-                <th className={`${cellLinea} min-w-[56px]`}>Nom. ref.</th>
-                <th className={`${cellLinea} min-w-[48px]`}>Med.</th>
-                <th className={`${cellLinea} min-w-[200px]`}>Descripción</th>
-                <th className={`${cellLinea} w-[52px] text-right`}>Cant.</th>
-                <th className={`${cellLinea} w-[44px] text-right`}>St.</th>
-                <th className={`${cellLinea} min-w-[84px] text-right`}>Precio Bs</th>
-                <th className={`${cellLinea} min-w-[72px] text-right`}>Parcial</th>
-                <th className={`${cellLinea} w-10 border-r-0 text-center`} />
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-amber-900/30">
-              {lineas.length === 0 ? (
-                <tr>
-                  <td colSpan={10} className="px-3 py-8 text-center text-xs text-slate-500">
-                    Sin líneas. Escanear código abajo o buscar en el catálogo.
-                  </td>
-                </tr>
-              ) : (
-                lineas.map((ln) => {
-                  const sub = subtotalLineaBs(ln);
-                  return (
-                    <tr key={ln.key} className="bg-slate-950/40">
-                      <td className={`${cellLinea} text-center text-slate-600`} />
-                      <td className={`${cellLinea} font-mono text-amber-200/90`}>{ln.producto.codigo}</td>
-                      <td className={`${cellLinea} font-mono text-slate-400`}>
-                        {ln.producto.codigoPieza?.trim()
-                          ? ln.producto.codigoPieza.length > 12
-                            ? `${ln.producto.codigoPieza.slice(0, 12)}…`
-                            : ln.producto.codigoPieza
-                          : "—"}
-                      </td>
-                      <td className={`${cellLinea} font-mono text-slate-400`}>{ln.producto.medida?.trim() || "—"}</td>
-                      <td className={`${cellLinea} max-w-[320px]`}>
-                        <span className="line-clamp-2 text-slate-100" title={ln.producto.descripcionMostrar}>
-                          {ln.producto.descripcionMostrar}
-                        </span>
-                      </td>
-                      <td className={`${cellLinea} text-right`}>
-                        <input
-                          className={`${inpPos} w-full text-right font-mono`}
-                          inputMode="numeric"
-                          value={ln.cantidad}
-                          onChange={(e) =>
-                            setLineas((prev) =>
-                              prev.map((x) => (x.key === ln.key ? { ...x, cantidad: e.target.value } : x))
-                            )
-                          }
-                        />
-                      </td>
-                      <td className={`${cellLinea} text-right font-mono text-emerald-200/80`}>{ln.producto.stock}</td>
-                      <td className={`${cellLinea} text-right`}>
-                        <input
-                          className={`${inpPos} w-full text-right font-mono`}
-                          placeholder={
-                            ln.producto.precio_venta_lista_bs != null
-                              ? ln.producto.precio_venta_lista_bs.toFixed(2)
-                              : "—"
-                          }
-                          value={ln.precioUnitBs}
-                          onChange={(e) =>
-                            setLineas((prev) =>
-                              prev.map((x) => (x.key === ln.key ? { ...x, precioUnitBs: e.target.value } : x))
-                            )
-                          }
-                        />
-                        {ln.producto.punto_tope != null ? (
-                          <p className="mt-0.5 text-[9px] text-amber-200/70">Tope {ln.producto.punto_tope.toFixed(2)}</p>
-                        ) : null}
-                      </td>
-                      <td className={`${cellLinea} text-right font-mono text-slate-200`}>
-                        {sub != null ? sub.toFixed(2) : "—"}
-                      </td>
-                      <td className={`${cellLinea} border-r-0 text-center`}>
-                        <button
-                          type="button"
-                          className="rounded p-1 text-slate-500 hover:bg-rose-500/15 hover:text-rose-200"
-                          aria-label="Quitar"
-                          onClick={() => setLineas((prev) => prev.filter((x) => x.key !== ln.key))}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
-
-        <div className="flex flex-col gap-3 border-t border-amber-800/25 pt-3 sm:flex-row sm:items-end sm:justify-between">
-          <div className="flex flex-wrap items-end gap-4">
-            <div className="rounded border border-slate-600/60 bg-slate-900/70 px-3 py-2">
-              <p className="text-[9px] font-bold uppercase text-slate-500">Descuentos</p>
-              <p className="mt-1 font-mono text-sm text-slate-400">0%</p>
-            </div>
-            <div className="rounded border border-amber-700/40 bg-black/30 px-4 py-2 text-right">
-              <p className="text-[9px] font-bold uppercase text-slate-500">Sub total</p>
-              <p className="font-mono text-lg text-amber-50">{totales.bs.toFixed(2)} Bs</p>
-              {tcVal > 0 ? (
-                <p className="font-mono text-xs text-slate-400">{totales.usd.toFixed(4)} USD</p>
-              ) : null}
-              <p className="mt-2 text-[9px] font-bold uppercase text-slate-500">Descuento Bs</p>
-              <p className="font-mono text-sm text-slate-400">0.00</p>
-              <p className="mt-2 text-[9px] font-bold uppercase text-amber-200/90">Sumar</p>
-              <p className="font-mono text-xl font-semibold text-amber-100">{totales.bs.toFixed(2)} Bs</p>
-            </div>
+      {/* 3 · Cobro y confirmación */}
+      <form onSubmit={confirmarVenta} className="space-y-5">
+        <div className="flex flex-col gap-4 rounded-2xl border border-amber-500/20 bg-slate-950/60 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Total a cobrar</p>
+            <p className="mt-1 font-mono text-3xl font-semibold tabular-nums text-amber-50">{totales.bs.toFixed(2)}</p>
+            <p className="text-sm text-amber-200/80">bolivianos</p>
+            {tcVal > 0 ? (
+              <p className="mt-2 font-mono text-sm text-slate-500">
+                ≈ <span className="text-slate-300">{totales.usd.toFixed(4)}</span> USD al tipo del día
+              </p>
+            ) : (
+              <p className="mt-2 text-xs text-amber-200/60">Sin conversión a USD: no hay tipo de cambio cargado.</p>
+            )}
           </div>
 
-          <div className="flex flex-wrap items-center gap-2 border-t border-white/5 pt-3 sm:border-t-0 sm:pt-0">
+          <div className="flex flex-wrap items-center justify-end gap-2 border-t border-white/5 pt-4 sm:border-t-0 sm:pt-0">
             <button
               type="button"
-              disabled
-              title="Próximamente"
-              className="inline-flex items-center gap-1.5 rounded border border-white/10 bg-slate-900/80 px-2.5 py-1.5 text-[11px] text-slate-500"
-            >
-              <RotateCcw className="h-3.5 w-3.5" />
-              Devolución
-            </button>
-            <button
-              type="button"
-              className="inline-flex items-center gap-1.5 rounded border border-white/10 bg-slate-900/80 px-2.5 py-1.5 text-[11px] text-slate-300 hover:bg-white/5"
-              onClick={() => window.print()}
-            >
-              <Printer className="h-3.5 w-3.5" />
-              Imprimir
-            </button>
-            <button
-              type="submit"
-              disabled={submitting || !tipoCambio || lineas.length === 0}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-amber-500/25 px-4 py-2 text-sm font-semibold text-amber-50 ring-1 ring-amber-500/40 hover:bg-amber-500/35 disabled:opacity-40"
-            >
-              {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4 opacity-90" />}
-              Confirmar
-            </button>
-            <button
-              type="button"
-              className="inline-flex items-center gap-1.5 rounded-lg border border-white/10 px-3 py-2 text-sm text-slate-300 hover:bg-white/5"
+              className="inline-flex items-center gap-2 rounded-xl border border-rose-500/40 bg-rose-950/40 px-3 py-2 text-sm text-rose-100 hover:bg-rose-900/55"
               onClick={() => {
-                if (lineas.length === 0) return;
-                if (!confirm("¿Vaciar todas las líneas del comprobante?")) return;
+                if (lineas.length === 0 && !clienteNombreLibre.trim() && !clienteNit.trim()) return;
+                if (!confirm("¿Descartar esta venta y limpiar datos del cobro?")) return;
                 setLineas([]);
-                setMsg(null);
-              }}
-            >
-              <Trash2 className="h-4 w-4" />
-              Vaciar
-            </button>
-            <button
-              type="button"
-              className="inline-flex items-center gap-1.5 rounded-lg border border-rose-600/50 bg-rose-950/40 px-3 py-2 text-sm font-medium text-rose-100 hover:bg-rose-900/50"
-              onClick={() => {
-                if (lineas.length === 0) return;
-                if (!confirm("¿Descartar el comprobante actual?")) return;
-                setLineas([]);
-                setNumeroDocumento("");
-                setClienteId("");
-                setCreditoFechaLimite("");
+                setClienteNombreLibre("");
+                setClienteNit("");
                 setTipoPago("efectivo");
                 setMsg(null);
               }}
             >
               <OctagonX className="h-4 w-4" />
-              Stop
+              Descartar
             </button>
-            <Link
-              href="/vendedor/ventas"
-              className="inline-flex items-center rounded-lg border border-white/10 px-3 py-2 text-sm text-slate-300 hover:border-white/20 hover:text-white"
+            <button
+              type="submit"
+              disabled={submitting || !tipoCambio || lineas.length === 0}
+              className="inline-flex min-w-[140px] items-center justify-center gap-2 rounded-xl bg-amber-500 py-2.5 pl-5 pr-6 text-sm font-semibold text-slate-950 shadow-lg shadow-amber-900/25 transition hover:bg-amber-400 disabled:pointer-events-none disabled:opacity-40"
             >
-              Historial
-            </Link>
+              {submitting ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <CheckCircle2 className="h-4 w-4" strokeWidth={2.5} />
+              )}
+              Confirmar venta
+            </button>
           </div>
         </div>
       </form>
 
-      <section className="space-y-2 border-t border-white/10 pt-4">
+      {/* 4 · Buscador de catálogo */}
+      <section className="space-y-3 border-t border-white/10 pt-6">
         <button
           type="button"
           onClick={() => setCatalogoExpandido((v) => !v)}
-          className="flex w-full items-center justify-between rounded-lg border border-amber-700/30 bg-slate-900/40 px-3 py-2 text-left text-sm font-medium text-amber-100/90 hover:bg-slate-900/60"
+          className="flex w-full items-center justify-between gap-3 rounded-xl border border-white/10 bg-slate-950/50 px-4 py-3 text-left transition hover:border-amber-500/30 hover:bg-slate-900/60"
         >
-          <span>Catálogo y filtros (admin)</span>
-          {catalogoExpandido ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+          <div>
+            <p className="text-sm font-semibold text-white">Buscador de repuestos</p>
+            <p className="mt-0.5 text-xs text-slate-500">
+              Stock por sucursal; podés agregar al carrito solo si tu depósito tiene existencia.
+            </p>
+          </div>
+          {catalogoExpandido ? (
+            <ChevronUp className="h-5 w-5 shrink-0 text-slate-500" />
+          ) : (
+            <ChevronDown className="h-5 w-5 shrink-0 text-slate-500" />
+          )}
         </button>
         {catalogoExpandido ? (
-          <div className="space-y-3">
-            <div className="rounded-2xl border border-white/10 bg-slate-900/50 p-4">
+          <div className="space-y-4">
+            <form
+              className="rounded-2xl border border-white/10 bg-slate-950/40 p-4 sm:p-5"
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (catalogLoading) return;
+                void ejecutarBusquedaCatalogo();
+              }}
+            >
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                 <div className="lg:col-span-2">
-                  <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Buscar (texto)</label>
+                  <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Texto</label>
                   <input
                     name="q"
                     value={q}
                     onChange={(e) => setQ(e.target.value)}
-                    placeholder="Una palabra: flexible. Dos+: todas deben aparecer (en cualquier campo)"
+                    placeholder="Palabras en código, nombre, descripción…"
                     className={`${inp} mt-1`}
                   />
                 </div>
                 <div>
-                  <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Código / QR exacto</label>
+                  <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                    Código exacto
+                  </label>
                   <input
                     value={codigo}
                     onChange={(e) => setCodigo(e.target.value)}
-                    placeholder="Ej. 1000 o 001000"
-                    className={`${inp} mt-1`}
+                    placeholder="Ej. 1000"
+                    className={`${inp} mt-1 font-mono`}
                   />
                 </div>
                 <div>
-                  <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Código pieza</label>
+                  <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Cód. pieza</label>
                   <input
                     value={codigoPieza}
                     onChange={(e) => setCodigoPieza(e.target.value)}
@@ -799,12 +1030,10 @@ export function NuevaVentaForm() {
                   />
                 </div>
                 <div>
-                  <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Especificación</label>
-                  <input
-                    value={especificacion}
-                    onChange={(e) => setEspecificacion(e.target.value)}
-                    className={`${inp} mt-1`}
-                  />
+                  <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                    Especificación
+                  </label>
+                  <input value={especificacion} onChange={(e) => setEspecificacion(e.target.value)} className={`${inp} mt-1`} />
                 </div>
                 <div>
                   <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Medida</label>
@@ -819,19 +1048,19 @@ export function NuevaVentaForm() {
                   <input value={repuesto} onChange={(e) => setRepuesto(e.target.value)} className={`${inp} mt-1`} />
                 </div>
                 <div>
-                  <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Modo stock</label>
+                  <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Qué stock ver</label>
                   <select
                     value={modoCatalogo}
                     onChange={(e) => setModoCatalogo(e.target.value as ModoCatalogoVenta)}
                     className={`${inp} mt-1`}
                   >
-                    <option value="mi_sucursal">Solo vendibles acá (stock en mi sucursal)</option>
+                    <option value="mi_sucursal">Solo lo vendible en mi sucursal</option>
                     <option value="referencia">Referencia: con stock en alguna sucursal</option>
-                    <option value="todos">Todos los activos (ver también sin stock)</option>
+                    <option value="todos">Todos los activos</option>
                   </select>
                 </div>
                 <div>
-                  <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Filas máx.</label>
+                  <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Máx. filas</label>
                   <input
                     value={perPage}
                     onChange={(e) => setPerPage(e.target.value)}
@@ -842,16 +1071,15 @@ export function NuevaVentaForm() {
               </div>
               <div className="mt-4 flex flex-wrap gap-2 border-t border-white/5 pt-4">
                 <button
-                  type="button"
+                  type="submit"
                   disabled={catalogLoading}
-                  onClick={() => void ejecutarBusquedaCatalogo()}
-                  className="rounded-lg bg-amber-600/90 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-500 disabled:opacity-40"
+                  className="rounded-xl bg-amber-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-amber-400 disabled:opacity-40"
                 >
-                  {catalogLoading ? "Buscando…" : "Buscar"}
+                  {catalogLoading ? "Buscando…" : "Buscar en catálogo"}
                 </button>
                 <button
                   type="button"
-                  className="rounded-lg border border-white/15 px-4 py-2 text-sm text-slate-300 hover:bg-white/5"
+                  className="rounded-xl border border-white/15 px-4 py-2 text-sm text-slate-300 hover:bg-white/5"
                   onClick={() => {
                     setQ("");
                     setCodigo("");
@@ -867,15 +1095,15 @@ export function NuevaVentaForm() {
                   Limpiar filtros
                 </button>
               </div>
-            </div>
+            </form>
             <p className="text-xs text-slate-500">
               {catalogLoading
-                ? "…"
+                ? "Consultando…"
                 : !catalogBuscado
-                  ? "Pulsá «Buscar» para consultar el catálogo (misma lógica de filtros que en admin)."
+                  ? "Elegí filtros y pulsá «Buscar en catálogo»."
                   : catalogTotal === 0
-                    ? "Sin resultados con estos filtros."
-                    : `Mostrando ${catalogRows.length} de ${catalogTotal} producto(s). Columnas de sucursal: stock disponible; resaltamos la tuya.`}
+                    ? "Sin resultados. Probá otro criterio o modo de stock."
+                    : `Mostrando ${catalogRows.length} de ${catalogTotal} producto(s). Tu sucursal va resaltada.`}
             </p>
             <VentaCatalogoTabla
               miSucursalId={miSucursalId}
@@ -888,60 +1116,75 @@ export function NuevaVentaForm() {
           </div>
         ) : null}
       </section>
+      </div>
 
-      <section className="space-y-3 border-t border-white/10 pt-4">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-amber-200/80">Código o QR rápido</h2>
-        <form onSubmit={buscarProducto} className="flex flex-col gap-3 sm:flex-row sm:items-end">
-          <div className="min-w-0 flex-1">
-            <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-              Escanear o pegar
-            </label>
-            <div className="relative">
-              <ScanLine className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-amber-400/50" />
-              <input
-                className={`${inp} rounded-lg pl-10 py-2`}
-                value={codigoBuscar}
-                onChange={(e) => setCodigoBuscar(e.target.value)}
-                placeholder="Enter para agregar si hay stock en tu sucursal"
-                autoComplete="off"
-              />
-            </div>
-          </div>
-          <button
-            type="submit"
-            disabled={buscando || !codigoBuscar.trim()}
-            className="inline-flex items-center justify-center gap-2 rounded-xl bg-amber-500/20 px-5 py-2 text-sm font-medium text-amber-100 ring-1 ring-amber-500/35 transition hover:bg-amber-500/30 disabled:opacity-40"
-          >
-            {buscando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-            Agregar
-          </button>
-        </form>
+      <div
+        id="factura-venta-proforma"
+        className="hidden bg-white text-[11px] leading-snug text-slate-900 print:block"
+        role="document"
+        aria-label="Factura preliminar de venta"
+      >
+        <div className="border-b border-slate-300 pb-2">
+          <p className="text-base font-bold tracking-tight text-slate-900">Nota de venta</p>
+          <p className="mt-0.5 font-mono text-[10px] text-slate-600">Tipo nota: proforma_1</p>
+          <p className="mt-1 font-semibold text-slate-800">{sucursalNombre}</p>
+          <p className="mt-0.5 font-mono text-[10px] text-slate-600">
+            {fechaHoraStr.fecha} · {fechaHoraStr.hora} (La Paz)
+          </p>
+          <p className="mt-0.5 text-[10px] text-slate-700">Vendedor: {username || "—"}</p>
+        </div>
 
-        {ultimoScanReferencia ? (
-          <div className="rounded-xl border border-amber-500/25 bg-amber-950/20 p-4 text-sm text-slate-300">
-            <p className="font-medium text-amber-100/90">
-              {ultimoScanReferencia.codigo} · stock en otras sucursales
-            </p>
-            <p className="mt-1 text-xs text-slate-500">
-              Lista Bs: {ultimoScanReferencia.precio_venta_lista_bs?.toFixed(2) ?? "—"} · Tope:{" "}
-              {ultimoScanReferencia.punto_tope?.toFixed(2) ?? "—"}
-            </p>
-            <ul className="mt-3 grid gap-1 sm:grid-cols-2">
-              {ultimoScanReferencia.porSucursal.map((s) => (
-                <li
-                  key={s.sucursalId}
-                  className={`flex justify-between gap-2 rounded-lg border border-white/5 px-2 py-1 font-mono text-xs ${
-                    s.sucursalId === miSucursalId ? "border-amber-500/30 bg-amber-500/10" : ""
-                  }`}
-                >
-                  <span className="truncate text-slate-400">{s.sucursalNombre}</span>
-                  <span className={s.stock > 0 ? "text-emerald-300" : "text-slate-600"}>{s.stock}</span>
-                </li>
-              ))}
-            </ul>
+        {clienteNombreLibre.trim() || clienteNit.trim() ? (
+          <div className="mt-2 border-b border-slate-200 pb-2 text-[10px] text-slate-800">
+            {clienteNombreLibre.trim() ? <p>Cliente: {clienteNombreLibre.trim()}</p> : null}
+            {clienteNit.trim() ? <p className="font-mono">NIT: {clienteNit.trim()}</p> : null}
           </div>
         ) : null}
-      </section>
+
+        <p className="mt-2 text-[10px] text-slate-800">
+          <span className="font-semibold">Forma de pago:</span>{" "}
+          {tipoPago === "efectivo" ? "Efectivo" : tipoPago === "qr" ? "QR" : "Tarjeta"}
+        </p>
+
+        <table className="mt-3 w-full border-collapse border border-slate-400 text-[10px]">
+          <thead>
+            <tr className="bg-slate-100 text-left text-slate-900">
+              <th className="border border-slate-400 px-1.5 py-1 font-semibold">Código</th>
+              <th className="border border-slate-400 px-1.5 py-1 font-semibold">Descripción</th>
+              <th className="border border-slate-400 px-1 py-1 text-right font-semibold">Cant.</th>
+              <th className="border border-slate-400 px-1 py-1 text-right font-semibold">P. unit. Bs</th>
+              <th className="border border-slate-400 px-1 py-1 text-right font-semibold">Subt. Bs</th>
+            </tr>
+          </thead>
+          <tbody>
+            {lineas.map((ln) => {
+              const unit = precioUnitLineaEfectivo(ln);
+              const sub = subtotalLineaBs(ln);
+              const p = ln.producto;
+              return (
+                <tr key={ln.key}>
+                  <td className="border border-slate-300 px-1.5 py-1 font-mono align-top text-slate-900">{p.codigo}</td>
+                  <td className="border border-slate-300 px-1.5 py-1 align-top text-slate-800">{p.descripcionMostrar}</td>
+                  <td className="border border-slate-300 px-1 py-1 text-right font-mono align-top text-slate-900">
+                    {ln.cantidad}
+                  </td>
+                  <td className="border border-slate-300 px-1 py-1 text-right font-mono align-top text-slate-900">
+                    {unit != null ? unit.toFixed(2) : "—"}
+                  </td>
+                  <td className="border border-slate-300 px-1 py-1 text-right font-mono align-top text-slate-900">
+                    {sub != null ? sub.toFixed(2) : "—"}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+
+        <div className="mt-3 flex items-end justify-between border-t-2 border-slate-800 pt-2 text-slate-900">
+          <span className="text-xs font-bold uppercase">Total</span>
+          <span className="font-mono text-sm font-bold">{totales.bs.toFixed(2)} Bs</span>
+        </div>
+      </div>
     </div>
   );
 }

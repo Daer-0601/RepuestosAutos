@@ -1,7 +1,7 @@
 "use client";
 
 import { Plus, Search, Trash2 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 
 type SucursalOpt = { id: number; nombre: string };
 
@@ -63,25 +63,6 @@ export function TraspasoForm({ sucursales }: { sucursales: SucursalOpt[] }) {
     [destinoNum, lineas, origenNum]
   );
 
-  const resumenStock = useMemo(
-    () =>
-      lineas
-        .filter((l) => l.productoId != null)
-        .map((l) => {
-          const cant = Math.trunc(Number(l.cantidad));
-          const cantidad = Number.isFinite(cant) && cant > 0 ? cant : 0;
-          return {
-            key: l.key,
-            codigo: l.codigo,
-            nombre: l.nombre,
-            stockOrigen: l.stockOrigen,
-            cantidad,
-            stockRestante: l.stockOrigen - cantidad,
-          };
-        }),
-    [lineas]
-  );
-
   useEffect(() => {
     if (!Number.isFinite(origenNum) || origenNum < 1) {
       setStockOrigenRows([]);
@@ -89,7 +70,7 @@ export function TraspasoForm({ sucursales }: { sucursales: SucursalOpt[] }) {
     }
     let cancelled = false;
     setStockOrigenLoading(true);
-    fetch(`/api/admin/traspasos?sucursal=${origenNum}&limit=10`, { cache: "no-store" })
+    fetch(`/api/admin/traspasos?sucursal=${origenNum}&limit=50`, { cache: "no-store" })
       .then(async (res) => {
         const data = (await res.json()) as { productos?: ProductoRow[]; error?: string };
         if (!res.ok) {
@@ -213,62 +194,255 @@ export function TraspasoForm({ sucursales }: { sucursales: SucursalOpt[] }) {
     }
   }
 
+  const tablaHeadCls = "border-b border-white/10 bg-black/25 text-xs uppercase tracking-wide text-slate-500";
+  const ctrlInp =
+    "w-full rounded-lg border border-white/10 bg-slate-900/80 px-3 py-2 text-sm text-white disabled:opacity-50";
+
   return (
     <form onSubmit={submit} className="space-y-5">
-      <div className="grid gap-3 sm:grid-cols-3">
-        <div>
-          <label className="block text-xs font-medium uppercase tracking-wide text-slate-400">Sucursal origen</label>
-          <select
-            className="mt-1 w-full rounded-lg border border-white/10 bg-slate-900/80 px-3 py-2 text-sm text-white"
-            value={sucursalOrigenId}
-            onChange={(e) => setSucursalOrigenId(e.target.value)}
-            disabled={pending}
-          >
-            <option value="">Elegir…</option>
-            {sucursales.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.nombre}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label className="block text-xs font-medium uppercase tracking-wide text-slate-400">Sucursal destino</label>
-          <select
-            className="mt-1 w-full rounded-lg border border-white/10 bg-slate-900/80 px-3 py-2 text-sm text-white"
-            value={sucursalDestinoId}
-            onChange={(e) => setSucursalDestinoId(e.target.value)}
-            disabled={pending}
-          >
-            <option value="">Elegir…</option>
-            {sucursales.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.nombre}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label className="block text-xs font-medium uppercase tracking-wide text-slate-400">Nota (opcional)</label>
-          <input
-            type="text"
-            className="mt-1 w-full rounded-lg border border-white/10 bg-slate-900/80 px-3 py-2 text-sm text-white"
-            value={nota}
-            onChange={(e) => setNota(e.target.value)}
-            disabled={pending}
-            placeholder="Ej: reposición rápida"
-          />
-        </div>
+      <div className="overflow-x-auto rounded-2xl border border-white/10 bg-slate-900/40">
+        <table className="w-full min-w-[720px] text-left text-sm">
+          <thead>
+            <tr className={tablaHeadCls}>
+              <th className="px-3 py-2.5">Sucursal origen</th>
+              <th className="px-3 py-2.5">Sucursal destino</th>
+              <th className="min-w-[200px] px-3 py-2.5">Nota (opcional)</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr className="align-top hover:bg-white/[0.02]">
+              <td className="border-b border-white/5 px-3 py-2.5">
+                <select
+                  className={ctrlInp}
+                  value={sucursalOrigenId}
+                  onChange={(e) => setSucursalOrigenId(e.target.value)}
+                  disabled={pending}
+                >
+                  <option value="">Elegir…</option>
+                  {sucursales.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.nombre}
+                    </option>
+                  ))}
+                </select>
+              </td>
+              <td className="border-b border-white/5 px-3 py-2.5">
+                <select
+                  className={ctrlInp}
+                  value={sucursalDestinoId}
+                  onChange={(e) => setSucursalDestinoId(e.target.value)}
+                  disabled={pending}
+                >
+                  <option value="">Elegir…</option>
+                  {sucursales.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.nombre}
+                    </option>
+                  ))}
+                </select>
+              </td>
+              <td className="border-b border-white/5 px-3 py-2.5">
+                <input
+                  type="text"
+                  className={ctrlInp}
+                  value={nota}
+                  onChange={(e) => setNota(e.target.value)}
+                  disabled={pending}
+                  placeholder="Ej: reposición rápida"
+                />
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </div>
 
-      <div className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/40 p-4">
+      <div className="space-y-5 rounded-2xl border border-white/10 bg-slate-900/40 p-4">
         <div>
-          <h3 className="text-sm font-semibold text-white">Stock en sucursal origen </h3>
-          <p className="mt-1 text-xs text-slate-500">Vista rápida para orientarte antes de agregar líneas.</p>
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+            <h3 className="text-sm font-semibold text-white">Productos a traspasar</h3>
+            <button
+              type="button"
+              onClick={addLine}
+              className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-white/15 bg-slate-800 px-2.5 py-1.5 text-xs text-white hover:bg-slate-700"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              Agregar fila
+            </button>
+          </div>
+
+        <div className="overflow-x-auto rounded-xl border border-white/10 bg-black/20">
+          <table className="w-full min-w-[980px] text-left text-sm">
+            <thead>
+              <tr className={tablaHeadCls}>
+                <th className="min-w-[220px] px-3 py-2.5">Buscar</th>
+                <th className="min-w-[100px] px-3 py-2.5">Código</th>
+                <th className="min-w-[200px] px-3 py-2.5">Producto</th>
+                <th className="w-24 whitespace-nowrap px-3 py-2.5">Stock origen</th>
+                <th className="w-28 whitespace-nowrap px-3 py-2.5">Cantidad</th>
+                <th className="w-28 whitespace-nowrap px-3 py-2.5">Restante</th>
+                <th className="w-14 px-3 py-2.5">
+                  <span className="sr-only">Quitar</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-white/5">
+              {lineas.map((l) => {
+                const cantTrunc = Math.trunc(Number(l.cantidad));
+                const cantParsed = Number.isFinite(cantTrunc) && cantTrunc > 0 ? cantTrunc : 0;
+                const restante =
+                  l.productoId != null ? l.stockOrigen - cantParsed : null;
+                const restNegativo = restante != null && restante < 0;
+
+                return (
+                  <Fragment key={l.key}>
+                    <tr className="align-top hover:bg-white/[0.02]">
+                      <td className="px-3 py-2.5">
+                        <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-stretch">
+                          <input
+                            type="text"
+                            value={l.query}
+                            onChange={(e) => updateLine(l.key, { query: e.target.value })}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                e.preventDefault();
+                                void buscarLinea(l.key);
+                              }
+                            }}
+                            placeholder="Código, nombre…"
+                            className="min-w-0 flex-1 rounded-lg border border-white/10 bg-slate-950/80 px-2.5 py-2 text-sm text-white"
+                            disabled={pending}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => buscarLinea(l.key)}
+                            className="inline-flex shrink-0 items-center justify-center gap-1 rounded-lg border border-white/15 bg-slate-800 px-3 py-2 text-xs text-white hover:bg-slate-700 sm:max-w-[7rem]"
+                            disabled={pending || l.buscando}
+                          >
+                            <Search className="h-3.5 w-3.5 shrink-0" />
+                            <span className="hidden sm:inline">{l.buscando ? "…" : "Buscar"}</span>
+                          </button>
+                        </div>
+                      </td>
+                      <td className="px-3 py-2.5 font-mono text-xs text-slate-400">
+                        {l.productoId ? l.codigo : "—"}
+                      </td>
+                      <td className="max-w-[280px] px-3 py-2.5">
+                        <span className="line-clamp-2 text-slate-100" title={l.nombre}>
+                          {l.productoId ? l.nombre : "—"}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2.5 text-emerald-300 tabular-nums">
+                        {l.productoId != null ? l.stockOrigen : "—"}
+                      </td>
+                      <td className="px-3 py-2.5">
+                        <input
+                          type="number"
+                          min={1}
+                          step={1}
+                          className="w-full min-w-[4.5rem] rounded-lg border border-white/10 bg-slate-950/80 px-2 py-1.5 tabular-nums text-sm text-white disabled:opacity-50"
+                          value={l.cantidad}
+                          onChange={(e) => updateLine(l.key, { cantidad: e.target.value })}
+                          disabled={pending || l.productoId == null}
+                        />
+                      </td>
+                      <td
+                        className={`px-3 py-2.5 tabular-nums font-medium ${
+                          restNegativo ? "text-rose-300" : "text-sky-200"
+                        }`}
+                      >
+                        {restante == null ? "—" : restante}
+                      </td>
+                      <td className="px-2 py-2.5 align-top">
+                        <button
+                          type="button"
+                          onClick={() => removeLine(l.key)}
+                          className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-rose-500/30 bg-rose-950/30 text-rose-200 hover:bg-rose-900/40"
+                          title="Quitar fila"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </td>
+                    </tr>
+                    {l.resultados.length > 0 ? (
+                      <tr className="bg-slate-950/45">
+                        <td className="px-3 pb-3 pt-0" colSpan={7}>
+                          <div className="rounded-lg border border-white/10">
+                            <table className="w-full min-w-[520px] text-left text-sm">
+                              <caption className="border-b border-white/10 px-3 py-2 text-left text-[11px] uppercase tracking-wide text-slate-500">
+                                Resultados de búsqueda — pulsá una fila para usarla
+                              </caption>
+                              <thead>
+                                <tr className={tablaHeadCls}>
+                                  <th className="px-3 py-2">Código</th>
+                                  <th className="px-3 py-2">Producto</th>
+                                  <th className="w-28 whitespace-nowrap px-3 py-2">Stock</th>
+                                  <th className="w-20 px-3 py-2">
+                                    <span className="sr-only">Acción</span>
+                                  </th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-white/5">
+                                {l.resultados.map((r) => {
+                                  const seleccionar = (): void =>
+                                    updateLine(l.key, {
+                                      productoId: r.producto_id,
+                                      codigo: r.codigo,
+                                      nombre: r.nombre,
+                                      stockOrigen: r.stock,
+                                      cantidad: "1",
+                                      resultados: [],
+                                      query: `${r.codigo} · ${r.nombre}`,
+                                    });
+                                  return (
+                                    <tr
+                                      key={`${l.key}-${r.producto_id}`}
+                                      tabIndex={0}
+                                      role="button"
+                                      className="cursor-pointer hover:bg-white/[0.06]"
+                                      onClick={seleccionar}
+                                      onKeyDown={(e) => {
+                                        if (e.key === "Enter" || e.key === " ") {
+                                          e.preventDefault();
+                                          seleccionar();
+                                        }
+                                      }}
+                                    >
+                                      <td className="px-3 py-2 font-mono text-xs text-slate-300">{r.codigo}</td>
+                                      <td className="max-w-[360px] px-3 py-2 text-slate-100">{r.nombre}</td>
+                                      <td className="px-3 py-2 tabular-nums text-emerald-300">{r.stock}</td>
+                                      <td className="px-3 py-2 text-right text-[11px] font-medium uppercase tracking-wide text-sky-300/95">
+                                        Usar
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        </td>
+                      </tr>
+                    ) : null}
+                  </Fragment>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+
+        <p className="text-xs text-slate-500">
+          Una vez que busques, elegí una fila en la tabla de resultados; la cantidad no puede superar el stock en origen.
+        </p>
+        </div>
+
+        <div className="border-t border-white/10 pt-4">
+          <h3 className="text-sm font-semibold text-white">Stock en sucursal origen</h3>
+          <p className="mt-1 text-xs text-slate-500">
+            Referencia rápida antes de cargar líneas (misma sucursal que «Origen»).
+          </p>
           <div className="mt-2 overflow-x-auto rounded-xl border border-white/10 bg-slate-950/40">
             <table className="w-full min-w-[620px] text-left text-sm">
-              <thead className="border-b border-white/10 bg-black/25 text-xs uppercase text-slate-500">
-                <tr>
+              <thead>
+                <tr className={tablaHeadCls}>
                   <th className="px-3 py-2">Código</th>
                   <th className="px-3 py-2">Producto</th>
                   <th className="px-3 py-2">Stock</th>
@@ -278,7 +452,7 @@ export function TraspasoForm({ sucursales }: { sucursales: SucursalOpt[] }) {
                 {stockOrigenLoading ? (
                   <tr>
                     <td className="px-3 py-4 text-slate-500" colSpan={3}>
-                      Cargando stock...
+                      Cargando stock…
                     </td>
                   </tr>
                 ) : stockOrigenRows.length === 0 ? (
@@ -292,7 +466,7 @@ export function TraspasoForm({ sucursales }: { sucursales: SucursalOpt[] }) {
                     <tr key={`stock-${r.producto_id}`} className="hover:bg-white/[0.02]">
                       <td className="px-3 py-2 font-mono text-slate-300">{r.codigo}</td>
                       <td className="max-w-[360px] truncate px-3 py-2 text-white">{r.nombre}</td>
-                      <td className="px-3 py-2 text-emerald-300">{r.stock}</td>
+                      <td className="px-3 py-2 tabular-nums text-emerald-300">{r.stock}</td>
                     </tr>
                   ))
                 )}
@@ -301,164 +475,23 @@ export function TraspasoForm({ sucursales }: { sucursales: SucursalOpt[] }) {
           </div>
         </div>
 
-        <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-white">Productos a traspasar</h3>
-          <button
-            type="button"
-            onClick={addLine}
-            className="inline-flex items-center gap-1 rounded-lg border border-white/15 bg-slate-800 px-2.5 py-1.5 text-xs text-white hover:bg-slate-700"
-          >
-            <Plus className="h-3.5 w-3.5" />
-            Agregar línea
-          </button>
+        <div className="space-y-3 border-t border-white/10 pt-4">
+          {err ? (
+            <p className="rounded-lg border border-rose-500/40 bg-rose-950/30 px-3 py-2 text-sm text-rose-200">{err}</p>
+          ) : null}
+          {ok ? (
+            <p className="rounded-lg border border-emerald-500/40 bg-emerald-950/30 px-3 py-2 text-sm text-emerald-200">{ok}</p>
+          ) : null}
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="submit"
+              disabled={pending || !puedeEnviar}
+              className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {pending ? "Registrando…" : "Registrar traspaso"}
+            </button>
+          </div>
         </div>
-
-        <div className="space-y-2">
-          {lineas.map((l) => (
-            <div key={l.key} className="rounded-xl border border-white/10 bg-black/20 p-3">
-              <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={l.query}
-                    onChange={(e) => updateLine(l.key, { query: e.target.value })}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        e.preventDefault();
-                        void buscarLinea(l.key);
-                      }
-                    }}
-                    placeholder="Buscar por código, nombre o descripción"
-                    className="w-full rounded-lg border border-white/10 bg-slate-950/80 px-3 py-2 text-sm text-white"
-                    disabled={pending}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => buscarLinea(l.key)}
-                    className="inline-flex items-center gap-1 rounded-lg border border-white/15 bg-slate-800 px-2.5 py-2 text-xs text-white hover:bg-slate-700"
-                    disabled={pending || l.buscando}
-                  >
-                    <Search className="h-3.5 w-3.5" />
-                    {l.buscando ? "Buscando…" : "Buscar"}
-                  </button>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => removeLine(l.key)}
-                  className="inline-flex items-center justify-center rounded-lg border border-rose-500/30 bg-rose-950/30 px-2 py-2 text-rose-200 hover:bg-rose-900/40"
-                  title="Quitar línea"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </button>
-              </div>
-
-              {l.resultados.length > 0 ? (
-                <div className="mt-2 max-h-40 overflow-auto rounded-lg border border-white/10 bg-slate-950/70">
-                  {l.resultados.map((r) => (
-                    <button
-                      key={`${l.key}-${r.producto_id}`}
-                      type="button"
-                      onClick={() =>
-                        updateLine(l.key, {
-                          productoId: r.producto_id,
-                          codigo: r.codigo,
-                          nombre: r.nombre,
-                          stockOrigen: r.stock,
-                          cantidad: "1",
-                          resultados: [],
-                          query: `${r.codigo} · ${r.nombre}`,
-                        })
-                      }
-                      className="flex w-full items-start justify-between gap-3 border-b border-white/5 px-3 py-2 text-left text-sm text-slate-200 hover:bg-white/5"
-                    >
-                      <span className="min-w-0">
-                        <span className="block truncate font-mono text-xs text-slate-400">{r.codigo}</span>
-                        <span className="block truncate">{r.nombre}</span>
-                      </span>
-                      <span className="shrink-0 text-xs text-emerald-300">Stock: {r.stock}</span>
-                    </button>
-                  ))}
-                </div>
-              ) : null}
-
-              {l.productoId ? (
-                <div className="mt-2 grid gap-2 sm:grid-cols-[1fr_auto_auto] sm:items-end">
-                  <div>
-                    <p className="font-mono text-xs text-slate-400">{l.codigo}</p>
-                    <p className="truncate text-sm text-white">{l.nombre}</p>
-                  </div>
-                  <p className="text-xs text-emerald-300">Disponible: {l.stockOrigen}</p>
-                  <div>
-                    <label className="block text-[11px] uppercase tracking-wide text-slate-500">Cantidad</label>
-                    <input
-                      type="number"
-                      min={1}
-                      step={1}
-                      className="mt-1 w-24 rounded-lg border border-white/10 bg-slate-950/80 px-2 py-1.5 text-sm text-white"
-                      value={l.cantidad}
-                      onChange={(e) => updateLine(l.key, { cantidad: e.target.value })}
-                      disabled={pending}
-                    />
-                  </div>
-                </div>
-              ) : (
-                <p className="mt-2 text-xs text-slate-500">Seleccioná un producto para esta línea.</p>
-              )}
-            </div>
-          ))}
-        </div>
-
-        <div className="mt-3 overflow-x-auto rounded-xl border border-white/10 bg-slate-950/40">
-          <table className="w-full min-w-[760px] text-left text-sm">
-            <thead className="border-b border-white/10 bg-black/25 text-xs uppercase text-slate-500">
-              <tr>
-                <th className="px-3 py-2">Código</th>
-                <th className="px-3 py-2">Producto</th>
-                <th className="px-3 py-2">Stock origen</th>
-                <th className="px-3 py-2">Cant. mover</th>
-                <th className="px-3 py-2">Stock restante</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-white/5">
-              {resumenStock.length === 0 ? (
-                <tr>
-                  <td className="px-3 py-4 text-slate-500" colSpan={5}>
-                    Todavía no hay productos seleccionados.
-                  </td>
-                </tr>
-              ) : (
-                resumenStock.map((r) => (
-                  <tr key={r.key} className="hover:bg-white/[0.02]">
-                    <td className="px-3 py-2 font-mono text-slate-300">{r.codigo}</td>
-                    <td className="max-w-[280px] truncate px-3 py-2 text-white">{r.nombre}</td>
-                    <td className="px-3 py-2 text-emerald-300">{r.stockOrigen}</td>
-                    <td className="px-3 py-2 text-amber-200">{r.cantidad}</td>
-                    <td
-                      className={`px-3 py-2 font-medium ${
-                        r.stockRestante < 0 ? "text-rose-300" : "text-sky-200"
-                      }`}
-                    >
-                      {r.stockRestante}
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {err ? <p className="rounded-lg border border-rose-500/40 bg-rose-950/30 px-3 py-2 text-sm text-rose-200">{err}</p> : null}
-      {ok ? <p className="rounded-lg border border-emerald-500/40 bg-emerald-950/30 px-3 py-2 text-sm text-emerald-200">{ok}</p> : null}
-
-      <div className="flex flex-wrap gap-2">
-        <button
-          type="submit"
-          disabled={pending || !puedeEnviar}
-          className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {pending ? "Registrando..." : "Registrar traspaso"}
-        </button>
       </div>
     </form>
   );

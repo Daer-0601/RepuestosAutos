@@ -47,3 +47,33 @@ body {
   }
 }
 
+/* Nueva venta vendedor: «Imprimir» solo la factura/proforma (#factura-venta-proforma) */
+@media print {
+  html.print-solo-factura-venta {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  html.print-solo-factura-venta body * {
+    visibility: hidden;
+  }
+
+  html.print-solo-factura-venta #factura-venta-proforma,
+  html.print-solo-factura-venta #factura-venta-proforma * {
+    visibility: visible;
+  }
+
+  html.print-solo-factura-venta #factura-venta-proforma {
+    position: absolute;
+    left: 0;
+    top: 0;
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 100%;
+    margin: 0;
+    padding: 10mm 12mm;
+    background: #fff !important;
+    color: #0f172a !important;
+  }
+}
+
