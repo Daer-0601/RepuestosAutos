@@ -21,13 +21,14 @@ export function condicionCodigoQrExacta(
   const s = normalizarTextoLecturaCodigoBarras(raw).replace(/%/g, "").slice(0, 80);
   if (!s) return null;
 
-  const c = `${tableAlias}.codigo`;
-  const q = `IFNULL(${tableAlias}.qr_payload,'')`;
+  /** Comparar sin espacios laterales en columnas (mismo criterio que al guardar en catálogo). */
+  const c = `TRIM(IFNULL(${tableAlias}.codigo,''))`;
+  const q = `TRIM(IFNULL(${tableAlias}.qr_payload,''))`;
 
   if (/^\d+$/.test(s)) {
     const n = Number(s);
     return {
-      sql: `(${c} = ? OR ${q} = ? OR CAST(${c} AS UNSIGNED) = ? OR CAST(${q} AS UNSIGNED) = ?)`,
+      sql: `(${c} = ? OR ${q} = ? OR (LENGTH(${c}) > 0 AND CAST(${c} AS UNSIGNED) = ?) OR (LENGTH(${q}) > 0 AND CAST(${q} AS UNSIGNED) = ?))`,
       params: [s, s, n, n],
     };
   }

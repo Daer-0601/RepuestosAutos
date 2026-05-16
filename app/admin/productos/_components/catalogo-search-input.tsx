@@ -1,30 +1,18 @@
 "use client";
 
-const TEXT_FILTER_NAMES = [
-  "q",
-  "codigo",
-  "codigo_pieza",
-  "especificacion",
-  "medida",
-  "descripcion",
-  "repuesto",
-] as const;
-
-export type CatalogoTextFilterName = (typeof TEXT_FILTER_NAMES)[number];
-
-function clearOtherTextFilters(form: HTMLFormElement, keepName: string) {
-  for (const name of TEXT_FILTER_NAMES) {
-    if (name === keepName) continue;
-    const el = form.elements.namedItem(name);
-    if (el instanceof HTMLInputElement) {
-      el.value = "";
-    }
-  }
-}
+export type CatalogoTextFilterName =
+  | "q"
+  | "codigo"
+  | "codigo_pieza"
+  | "especificacion"
+  | "medida"
+  | "descripcion"
+  | "repuesto";
 
 /**
- * Input de filtro del catálogo: al enfocar, vacía los demás buscadores de texto
- * (un criterio a la vez antes de pulsar «Buscar»).
+ * Input de filtro del catálogo (GET). Sin limpiar otros campos al enfocar: eso borraba «Código»
+ * si el usuario pasaba el foco a otro campo antes de «Buscar». La deduplicación `q` vs `codigo`
+ * se resuelve en el servidor (`parseCatalogoFiltrosCore`).
  */
 export function CatalogoSearchInput({
   name,
@@ -44,12 +32,6 @@ export function CatalogoSearchInput({
       placeholder={placeholder}
       autoComplete="off"
       className={className}
-      onFocus={(e) => {
-        const form = e.currentTarget.form;
-        if (form) {
-          clearOtherTextFilters(form, name);
-        }
-      }}
     />
   );
 }

@@ -3,7 +3,7 @@ import "server-only";
 import { CATALOGO_FILAS_DEFAULT, CATALOGO_FILAS_MAX } from "@/lib/catalogo-productos-constants";
 import { pool } from "@/lib/db";
 import { condicionCodigoQrExacta } from "@/lib/data/producto-codigo-busqueda-exacta";
-import { sqlInt } from "@/lib/data/sql-utils";
+import { sqlInt, sqlOffset } from "@/lib/data/sql-utils";
 import type { RowDataPacket } from "mysql2";
 
 export { CATALOGO_FILAS_DEFAULT, CATALOGO_FILAS_MAX } from "@/lib/catalogo-productos-constants";
@@ -164,18 +164,6 @@ function addFlexibleDescripcionFilter(
   }
 }
 
-/** Código interno / QR: solo coincidencia exacta (ver `condicionCodigoQrExacta`). */
-function addCodigoCatalogoFilter(
-  parts: string[],
-  params: (string | number | null)[],
-  raw: string
-): void {
-  const frag = condicionCodigoQrExacta(raw, "p");
-  if (!frag) return;
-  parts.push(frag.sql);
-  params.push(...frag.params);
-}
-
 /**
  * Búsqueda amplia (`q`): concatena texto útil del producto y exige que cada token aparezca en ese bloque (más
  * flexible que exigir cada token en una sola columna). Tokens con `searchTokensAmplia` (no rompe guiones en códigos).
@@ -220,6 +208,18 @@ function addFlexibleBusquedaAmplia(parts: string[], params: (string | number | n
   parts.push(branches.length === 1 ? branches[0] : `(${branches.join(" OR ")})`);
 }
 
+/** Campo «Código» del catálogo admin: solo `productos.codigo` y `productos.qr_payload` (ver `condicionCodigoQrExacta`). */
+function addCodigoCatalogoFilter(
+  parts: string[],
+  params: (string | number | null)[],
+  raw: string
+): void {
+  const frag = condicionCodigoQrExacta(raw, "p");
+  if (!frag) return;
+  parts.push(frag.sql);
+  params.push(...frag.params);
+}
+
 function buildWhere(f: CatalogoFiltrosInput): { sql: string; params: (string | number | null)[] } {
   const parts: string[] = [];
   const params: (string | number | null)[] = [];
@@ -230,7 +230,6 @@ function buildWhere(f: CatalogoFiltrosInput): { sql: string; params: (string | n
   }
 
   addFlexibleBusquedaAmplia(parts, params, f.q);
-
   addCodigoCatalogoFilter(parts, params, f.codigo);
   addFlexibleColumnAnyToken(parts, params, "IFNULL(p.codigo_pieza,'')", f.codigo_pieza);
   addFlexibleColumnAnyToken(parts, params, "IFNULL(p.especificacion,'')", f.especificacion);
@@ -271,7 +270,7 @@ export async function countProductosCatalogo(f: CatalogoFiltrosInput): Promise<n
 export async function listProductosCatalogo(f: CatalogoFiltrosInput): Promise<ProductoCatalogoRow[]> {
   const { sql, params } = buildWhere(f);
   const lim = sqlInt(f.pageSize, CATALOGO_FILAS_MAX);
-  const off = sqlInt(f.pageOffset ?? 0, 1_000_000);
+  const off = sqlOffset(f.pageOffset ?? 0, 1_000_000);
 
   const [rows] = await pool.execute<RowDataPacket[]>(
     `SELECT p.id, p.codigo, p.qr_payload, p.codigo_pieza, p.especificacion, p.descripcion, p.repuesto, p.procedencia,
@@ -372,38 +371,48 @@ export function stringifyCatalogoFiltros(
 }
 
 function parseCatalogoFiltrosCore(s: (k: string) => string): CatalogoFiltrosInput {
-  const stockRaw = s("stock");
+  const stockRaw = s("stock").trim();
   const stock: CatalogoFiltrosInput["stock"] =
     stockRaw === "cero" || stockRaw === "positivo" ? stockRaw : "";
 
-  const est = s("estado");
+  const est = s("estado").trim();
   let estado: CatalogoFiltrosInput["estado"];
   if (est === "todos" || est === "all") estado = "";
   else if (est === "inactivo") estado = "inactivo";
   else estado = "activo";
 
-  const sucRaw = Number(s("sucursal"));
+  const sucRaw = Number(s("sucursal").trim());
   const sucursalStockId = Number.isFinite(sucRaw) && sucRaw > 0 ? sucRaw : null;
 
-  const perRaw = Number(s("perPage"));
+  const perRaw = Number(s("perPage").trim());
   const pageSize =
     Number.isFinite(perRaw) && perRaw >= 10 ? sqlInt(perRaw, CATALOGO_FILAS_MAX) : CATALOGO_FILAS_DEFAULT;
 
-  const pageOffRaw = Number(s("pageOffset"));
+  const pageOffRaw = Number(s("pageOffset").trim());
   /** OFFSET puede ser 0; no usar `sqlInt` (su mínimo es 1 y rompe la primera página). */
   const pageOffset =
     Number.isFinite(pageOffRaw) && pageOffRaw >= 0
       ? Math.min(Math.trunc(pageOffRaw), 1_000_000)
       : 0;
 
+  const codigo = s("codigo").trim();
+  const qRaw = s("q").trim();
+  const codigoPiezaRaw = s("codigo_pieza").trim();
+  /**
+   * Un solo criterio “principal” de texto: si hay campo «Código», no mezclar con `q` ni con
+   * «Código pieza» en el mismo GET (AND devolvía 0 filas con frecuencia).
+   */
+  const q = codigo ? "" : qRaw;
+  const codigo_pieza = codigo ? "" : codigoPiezaRaw;
+
   return {
-    q: s("q"),
-    codigo: s("codigo"),
-    codigo_pieza: s("codigo_pieza"),
-    especificacion: s("especificacion"),
-    medida: s("medida"),
-    descripcion: s("descripcion"),
-    repuesto: s("repuesto"),
+    q,
+    codigo,
+    codigo_pieza,
+    especificacion: s("especificacion").trim(),
+    medida: s("medida").trim(),
+    descripcion: s("descripcion").trim(),
+    repuesto: s("repuesto").trim(),
     stock,
     sucursalStockId,
     estado,
@@ -415,7 +424,8 @@ function parseCatalogoFiltrosCore(s: (k: string) => string): CatalogoFiltrosInpu
 export function parseCatalogoFiltros(sp: Record<string, string | string[] | undefined>): CatalogoFiltrosInput {
   const s = (k: string) => {
     const v = sp[k];
-    return Array.isArray(v) ? v[0] ?? "" : v ?? "";
+    const raw = Array.isArray(v) ? v[0] ?? "" : v ?? "";
+    return typeof raw === "string" ? raw : String(raw);
   };
   return parseCatalogoFiltrosCore(s);
 }

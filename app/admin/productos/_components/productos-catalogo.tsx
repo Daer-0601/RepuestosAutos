@@ -16,6 +16,23 @@ const inp =
 const inpBuscarTodo =
   "w-full rounded border border-white/10 bg-slate-950/80 px-1.5 py-1 text-[11px] leading-snug text-white placeholder:text-slate-600 outline-none focus:border-sky-500/40 placeholder:text-[10px]";
 
+function catalogoFormHydrationKey(f: CatalogoFiltrosInput): string {
+  return [
+    f.q,
+    f.codigo,
+    f.codigo_pieza,
+    f.especificacion,
+    f.medida,
+    f.descripcion,
+    f.repuesto,
+    f.stock,
+    f.sucursalStockId ?? "",
+    f.estado,
+    String(f.pageSize),
+    String(f.pageOffset),
+  ].join("\u241e");
+}
+
 export function ProductosCatalogo({
   filtros,
   sucursales,
@@ -29,7 +46,12 @@ export function ProductosCatalogo({
 }) {
   return (
     <div className="space-y-4">
-      <form method="get" className="rounded-2xl border border-white/10 bg-slate-900/50 p-4">
+      <form
+        key={catalogoFormHydrationKey(filtros)}
+        method="get"
+        action="/admin/productos"
+        className="rounded-2xl border border-white/10 bg-slate-900/50 p-4"
+      >
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5">
           <div className="max-w-full sm:max-w-md">
             <label className="text-[9px] font-semibold uppercase tracking-wide text-slate-500">Buscar (todo)</label>
@@ -45,7 +67,7 @@ export function ProductosCatalogo({
             <CatalogoSearchInput
               name="codigo"
               defaultValue={filtros.codigo}
-              placeholder="Ej. 1000 o 001000 (exacto)"
+              placeholder="Solo código interno o texto del QR (exacto)"
               className={`${inp} mt-1`}
             />
           </div>

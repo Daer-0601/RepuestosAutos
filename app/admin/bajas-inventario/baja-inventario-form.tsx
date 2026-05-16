@@ -211,11 +211,6 @@ export function BajaInventarioForm({ sucursales }: { sucursales: SucursalOpt[] }
 
   return (
     <form onSubmit={submit} className="space-y-5">
-      <p className="rounded-lg border border-amber-500/25 bg-amber-950/20 px-3 py-2 text-sm text-amber-100/90">
-        Esta acción <strong>reduce el stock real</strong> en la sucursal elegida: se descuentan lotes por orden de
-        ingreso (FIFO), igual que en una venta, y queda un movimiento de salida en el historial.
-      </p>
-
       <div className="grid gap-3 sm:grid-cols-2">
         <div>
           <label className="block text-xs font-medium uppercase tracking-wide text-slate-400">Sucursal</label>
