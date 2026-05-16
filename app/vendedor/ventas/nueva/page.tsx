@@ -8,12 +8,7 @@ export const metadata: Metadata = {
 
 export default function VendedorNuevaVentaPage() {
   return (
-    <PanelSection
-      variant="vendedor"
-      wide
-      title="Nueva venta"
-      description="Flujo de venta: lector arriba, líneas editables al centro y cierre de cobro abajo. El buscador de catálogo queda aparte para cuando necesités explorar stock."
-    >
+    <PanelSection variant="vendedor" wide>
       <NuevaVentaForm />
     </PanelSection>
   );

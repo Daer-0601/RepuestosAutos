@@ -637,7 +637,6 @@ export function NuevaVentaForm() {
       <div className="space-y-6 text-slate-300">
       <VentaVendedorToolbar
         sucursalNombre={sucursalNombre}
-        miSucursalId={miSucursalId}
         username={username}
         tipoCambioBsPorUsd={tcBs}
         fechaStr={fechaHoraStr.fecha}

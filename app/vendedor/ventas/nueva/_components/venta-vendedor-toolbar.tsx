@@ -4,14 +4,12 @@ import { Store } from "lucide-react";
 
 export function VentaVendedorToolbar({
   sucursalNombre,
-  miSucursalId,
   username,
   tipoCambioBsPorUsd,
   fechaStr,
   horaStr,
 }: {
   sucursalNombre: string;
-  miSucursalId: number;
   username: string;
   tipoCambioBsPorUsd: number | null;
   fechaStr: string;
@@ -34,7 +32,6 @@ export function VentaVendedorToolbar({
         <div className="min-w-0">
           <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Tu sucursal</p>
           <p className="truncate text-base font-semibold text-white">{sucursalNombre || "—"}</p>
-          <p className="font-mono text-[11px] text-slate-500">ID {miSucursalId}</p>
         </div>
       </div>
 

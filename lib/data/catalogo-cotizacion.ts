@@ -1,12 +1,15 @@
 import "server-only";
 
+import { pool } from "@/lib/db";
 import { CATALOGO_FILAS_MAX } from "@/lib/catalogo-productos-constants";
 import {
   countProductosCatalogo,
   listProductosCatalogo,
   parseCatalogoFiltrosFromJsonBody,
 } from "@/lib/data/productos-catalogo";
+import { searchProductosParaIngreso } from "@/lib/data/productos";
 import { sqlInt } from "@/lib/data/sql-utils";
+import type { RowDataPacket } from "mysql2";
 
 const PEDIDO_PAGE_DEFAULT = 80;
 
@@ -73,35 +76,60 @@ export async function catalogoCotizacionListarActivosPagina(
   return { productos: rows.map(mapRow), total, page: p };
 }
 
-/** Solo código interno (etiqueta / lector) o payload de QR exacto — no incluye código pieza. */
-export async function catalogoCotizacionBuscarSoloCodigo(
-  codigoRaw: string,
+async function sumStockTotalPorProductoIds(ids: number[]): Promise<Map<number, number>> {
+  const m = new Map<number, number>();
+  if (ids.length === 0) return m;
+  for (const id of ids) m.set(id, 0);
+  const ph = ids.map(() => "?").join(",");
+  const [rows] = await pool.execute<RowDataPacket[]>(
+    `SELECT producto_id AS pid, COALESCE(SUM(stock), 0) AS s
+     FROM inventario
+     WHERE producto_id IN (${ph})
+     GROUP BY producto_id`,
+    ids
+  );
+  for (const r of rows as { pid: number; s: number }[]) {
+    m.set(r.pid, Number(r.s));
+  }
+  return m;
+}
+
+/**
+ * Misma lógica que admin ingreso de compra (`modo=barra`): código interno / QR exacto
+ * vía `condicionCodigoQrExacta`, más coincidencias parciales por nombre. No usa código pieza.
+ */
+export async function catalogoCotizacionBuscarCodigoBarraComoIngreso(
+  qRaw: string,
   perPageRaw: unknown
 ): Promise<{ productos: ProductoCatalogoCotizacionJson[]; total: number }> {
-  const codigo = codigoRaw.trim();
-  if (!codigo) {
+  const q = qRaw.trim();
+  if (!q) {
     return { productos: [], total: 0 };
   }
   const perRaw = perPageRaw !== undefined ? Number(perPageRaw) : PEDIDO_PAGE_DEFAULT;
-  const perPage =
+  const lim =
     Number.isFinite(perRaw) && perRaw >= 10 ? sqlInt(Math.trunc(perRaw), CATALOGO_FILAS_MAX) : PEDIDO_PAGE_DEFAULT;
 
-  const filtros = parseCatalogoFiltrosFromJsonBody({
-    perPage,
-    estado: "activo",
-    stock: "",
-    q: "",
-    codigo,
-    codigo_pieza: "",
-    especificacion: "",
-    medida: "",
-    descripcion: "",
-    repuesto: "",
-    pageOffset: 0,
-  });
-  const total = await countProductosCatalogo(filtros);
-  const rows = await listProductosCatalogo(filtros);
-  return { productos: rows.map(mapRow), total };
+  const rowsIngreso = await searchProductosParaIngreso(q, "barra", lim);
+  if (rowsIngreso.length === 0) {
+    return { productos: [], total: 0 };
+  }
+  const stocks = await sumStockTotalPorProductoIds(rowsIngreso.map((r) => r.id));
+  const productos: ProductoCatalogoCotizacionJson[] = rowsIngreso.map((r) => ({
+    id: r.id,
+    codigo: r.codigo,
+    codigo_pieza: r.codigo_pieza,
+    nombre: r.nombre,
+    medida: r.medida,
+    marca_auto: r.marca_auto,
+    especificacion: r.especificacion,
+    repuesto: r.repuesto,
+    precio_venta_lista_bs: r.precio_venta_lista_bs,
+    precio_venta_lista_usd: r.precio_venta_lista_usd,
+    punto_tope: r.punto_tope,
+    stock_total: stocks.get(r.id) ?? 0,
+  }));
+  return { productos, total: productos.length };
 }
 
 /** Búsqueda amplia (`q`), misma semántica que el catálogo en otras pantallas. */

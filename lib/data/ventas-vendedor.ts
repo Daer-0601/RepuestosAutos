@@ -257,20 +257,67 @@ export type VentaListadoRow = {
   cliente_nombre: string | null;
 };
 
-export async function listVentasPorSucursal(sucursalId: number, limit = 80): Promise<VentaListadoRow[]> {
+export async function listVentasPorSucursal(
+  sucursalId: number,
+  limit = 80,
+  opts?: { fechaDesde: string; fechaHasta: string } | null
+): Promise<VentaListadoRow[]> {
   if (!Number.isFinite(sucursalId) || sucursalId < 1) return [];
-  const lim = sqlInt(limit, 200);
+  const hasFecha =
+    opts != null &&
+    typeof opts.fechaDesde === "string" &&
+    typeof opts.fechaHasta === "string" &&
+    opts.fechaDesde.length > 0 &&
+    opts.fechaHasta.length > 0;
+  const lim = hasFecha ? sqlInt(limit, 5000) : sqlInt(limit, 200);
+  const dateClause = hasFecha ? "AND DATE(v.fecha) >= ? AND DATE(v.fecha) <= ?" : "";
+  const params: (string | number)[] = [sucursalId];
+  if (hasFecha) {
+    params.push(opts!.fechaDesde, opts!.fechaHasta);
+  }
   const [rows] = await pool.query<RowDataPacket[]>(
     `SELECT v.id, v.fecha, v.tipo_pago, v.total_bs, v.total_usd, v.estado_cobro,
             c.nombre AS cliente_nombre
      FROM ventas v
      LEFT JOIN clientes c ON c.id = v.cliente_id
      WHERE v.sucursal_id = ? AND v.estado = 'confirmada'
+     ${dateClause}
      ORDER BY v.fecha DESC, v.id DESC
      LIMIT ${lim}`,
-    [sucursalId]
+    params
   );
   return rows as VentaListadoRow[];
+}
+
+/** Sumas de todas las ventas confirmadas en el rango (sin límite de filas). */
+export async function sumTotalesVentasPorSucursalEnRango(
+  sucursalId: number,
+  fechaDesde: string,
+  fechaHasta: string
+): Promise<{ totalBs: number; totalUsd: number; cantidad: number }> {
+  if (!Number.isFinite(sucursalId) || sucursalId < 1) {
+    return { totalBs: 0, totalUsd: 0, cantidad: 0 };
+  }
+  const d1 = fechaDesde.trim();
+  const d2 = fechaHasta.trim();
+  if (!d1 || !d2) return { totalBs: 0, totalUsd: 0, cantidad: 0 };
+
+  const [rows] = await pool.query<RowDataPacket[]>(
+    `SELECT COALESCE(SUM(v.total_bs), 0) AS sum_bs,
+            COALESCE(SUM(v.total_usd), 0) AS sum_usd,
+            COUNT(*) AS n
+     FROM ventas v
+     WHERE v.sucursal_id = ? AND v.estado = 'confirmada'
+       AND DATE(v.fecha) >= ? AND DATE(v.fecha) <= ?`,
+    [sucursalId, d1, d2]
+  );
+  const r = rows[0] as { sum_bs: unknown; sum_usd: unknown; n: unknown } | undefined;
+  if (!r) return { totalBs: 0, totalUsd: 0, cantidad: 0 };
+  return {
+    totalBs: Number(r.sum_bs),
+    totalUsd: Number(r.sum_usd),
+    cantidad: Number(r.n),
+  };
 }
 
 export type LineaVentaInput = {

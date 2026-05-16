@@ -97,14 +97,9 @@ export function AdminSidebar({ username }: { username: string }) {
         }`}
       >
         <div className="flex h-14 items-center justify-between border-b border-white/10 px-4 lg:h-16">
-          <div className="flex min-w-0 items-center gap-2">
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-rose-500 to-rose-700 text-sm font-bold text-white shadow-md ring-1 ring-white/15">
-              R
-            </div>
-            <div className="min-w-0">
-              <p className="truncate text-sm font-semibold text-white">Repuestos</p>
-              <p className="truncate text-xs text-emerald-400/90">Administración</p>
-            </div>
+          <div className="min-w-0">
+            <p className="truncate text-sm font-semibold text-white">Repuestos</p>
+            <p className="truncate text-xs text-emerald-400/90">Administración</p>
           </div>
           <button
             type="button"

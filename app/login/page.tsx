@@ -1,3 +1,4 @@
+import { SystemBrandLogo } from "@/app/_components/system-brand-logo";
 import type { Metadata } from "next";
 import { BarChart3, Building2, Package } from "lucide-react";
 import { LoginForm } from "./login-form";
@@ -46,14 +47,9 @@ export default function LoginPage() {
                 aria-hidden
               />
               <div className="relative flex flex-col items-center text-center">
-                <div className="mb-5 flex h-[4.25rem] w-[4.25rem] items-center justify-center rounded-2xl bg-gradient-to-br from-rose-500 to-rose-700 shadow-lg shadow-rose-950/45 ring-2 ring-white/15">
-                  <span className="text-2xl font-bold tracking-tight text-white">
-                    R
-                  </span>
+                <div className="mb-5 w-full px-1">
+                  <SystemBrandLogo variant="loginHero" priority className="drop-shadow-md" />
                 </div>
-                <p className="text-lg font-semibold tracking-tight text-white">
-                  Repuestos
-                </p>
                 <div
                   className="mt-5 flex gap-2.5"
                   role="list"
@@ -98,11 +94,8 @@ export default function LoginPage() {
               aria-hidden
             />
 
-            <header className="mb-6 flex items-center gap-2.5 lg:hidden">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-rose-500 to-rose-700 shadow-md ring-1 ring-white/20">
-                <span className="text-sm font-bold text-white">R</span>
-              </div>
-              <span className="font-semibold text-white">Repuestos</span>
+            <header className="mb-6 flex items-center gap-3 lg:hidden">
+              <SystemBrandLogo variant="loginMobile" priority />
             </header>
 
             <div className="relative w-full">

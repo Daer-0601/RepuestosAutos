@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { BarChart3, Package, ShoppingCart, Wallet } from "lucide-react";
+import { Calculator, Wallet } from "lucide-react";
 import Link from "next/link";
 
 export const metadata: Metadata = {
@@ -8,25 +8,11 @@ export const metadata: Metadata = {
 
 const cards = [
   {
-    href: "/cajero/reportes/ventas",
-    title: "Ventas",
-    desc: "Totales y detalle por período en tu sucursal.",
-    icon: ShoppingCart,
-    ring: "from-emerald-500/20 to-emerald-800/10 ring-emerald-500/20",
-  },
-  {
-    href: "/cajero/reportes/compras",
-    title: "Compras",
-    desc: "Compras a proveedores registradas en la sucursal.",
-    icon: BarChart3,
-    ring: "from-slate-500/15 to-slate-800/10 ring-white/10",
-  },
-  {
-    href: "/cajero/reportes/inventario",
-    title: "Inventario",
-    desc: "Stock actual y movimientos.",
-    icon: Package,
-    ring: "from-emerald-600/15 to-slate-800/10 ring-emerald-500/15",
+    href: "/cajero/reportes/arqueo-vendedores",
+    title: "Arqueo vendedores",
+    desc: "Totales por vendedor e impresión de salidas diarias (detalle de ítems) para cierre de caja.",
+    icon: Calculator,
+    ring: "from-teal-500/20 to-emerald-900/10 ring-teal-500/25",
   },
   {
     href: "/cajero/reportes/creditos",

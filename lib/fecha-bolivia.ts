@@ -35,3 +35,19 @@ export const formatoMostrarFechaBo: Intl.DateTimeFormatOptions = {
   timeZone: ZONA_HORARIA_NEGOCIO,
   dateStyle: "short",
 };
+
+/**
+ * Valida `YYYY-MM-DD` (calendario) y devuelve el mismo string o `null`.
+ * Útil para query params de filtros por día / rango.
+ */
+export function parseIsoDateOnly(raw: string | undefined | null): string | null {
+  if (raw == null || typeof raw !== "string") return null;
+  const s = raw.trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+  const [y, m, d] = s.split("-").map(Number);
+  if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return null;
+  if (m < 1 || m > 12 || d < 1 || d > 31) return null;
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== m - 1 || dt.getUTCDate() !== d) return null;
+  return s;
+}

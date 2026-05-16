@@ -2,12 +2,10 @@
 
 import { logout } from "@/lib/auth/logout";
 import {
-  BarChart3,
+  Calculator,
   LayoutDashboard,
   LogOut,
   Menu,
-  Package,
-  ShoppingCart,
   Wallet,
   X,
 } from "lucide-react";
@@ -17,9 +15,7 @@ import { useState } from "react";
 
 const nav = [
   { href: "/cajero", label: "Inicio", icon: LayoutDashboard, exact: true },
-  { href: "/cajero/reportes/ventas", label: "Ventas", icon: ShoppingCart },
-  { href: "/cajero/reportes/compras", label: "Compras", icon: BarChart3 },
-  { href: "/cajero/reportes/inventario", label: "Inventario", icon: Package },
+  { href: "/cajero/reportes/arqueo-vendedores", label: "Arqueo vendedores", icon: Calculator },
   { href: "/cajero/reportes/creditos", label: "Créditos", icon: Wallet },
 ] as const;
 
@@ -92,14 +88,9 @@ export function CajeroSidebar({
         }`}
       >
         <div className="flex h-14 items-center justify-between border-b border-white/10 px-4 lg:h-16">
-          <div className="flex min-w-0 items-center gap-2">
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-emerald-500 to-emerald-700 text-sm font-bold text-white shadow-md ring-1 ring-white/15">
-              R
-            </div>
-            <div className="min-w-0">
-              <p className="truncate text-sm font-semibold text-white">Repuestos</p>
-              <p className="truncate text-xs text-emerald-400/90">Caja · {sucursalNombre}</p>
-            </div>
+          <div className="min-w-0">
+            <p className="truncate text-sm font-semibold text-white">Repuestos</p>
+            <p className="truncate text-xs text-emerald-400/90">Caja · {sucursalNombre}</p>
           </div>
           <button
             type="button"

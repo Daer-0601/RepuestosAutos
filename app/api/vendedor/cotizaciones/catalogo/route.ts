@@ -1,7 +1,7 @@
 import { getVendedorStaffContextOrNull } from "@/lib/auth/staff-panel-context";
 import {
+  catalogoCotizacionBuscarCodigoBarraComoIngreso,
   catalogoCotizacionBuscarPorTerm,
-  catalogoCotizacionBuscarSoloCodigo,
   catalogoCotizacionBuscarSoloQ,
   catalogoCotizacionListarActivosPagina,
 } from "@/lib/data/catalogo-cotizacion";
@@ -28,9 +28,15 @@ export async function POST(request: Request) {
     return NextResponse.json(data);
   }
 
-  const codigo = typeof b.codigo === "string" ? b.codigo.trim() : "";
-  if (codigo.length > 0) {
-    const data = await catalogoCotizacionBuscarSoloCodigo(codigo, b.perPage);
+  const codigoBarraRaw = b.codigoBarra;
+  const codigoBarra =
+    typeof codigoBarraRaw === "string"
+      ? codigoBarraRaw.trim()
+      : typeof codigoBarraRaw === "number" && Number.isFinite(codigoBarraRaw)
+        ? String(Math.trunc(codigoBarraRaw))
+        : "";
+  if (codigoBarra.length > 0) {
+    const data = await catalogoCotizacionBuscarCodigoBarraComoIngreso(codigoBarra, b.perPage);
     return NextResponse.json(data);
   }
 

@@ -2,7 +2,7 @@
 
 import { formatoMostrarFechaHoraBo } from "@/lib/fecha-bolivia";
 import { rangoPrecioListaTopeBs } from "@/lib/venta-precio-lista-tope-range";
-import { FileText, Loader2, Plus, Save, Search, Trash2 } from "lucide-react";
+import { Loader2, Plus, Printer, Search, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 const inp =
@@ -32,6 +32,8 @@ type LineaCot = {
   key: string;
   productoId: number;
   codigo: string;
+  codigoPieza: string | null;
+  medida: string | null;
   nombre: string;
   cantidad: string;
   precioUnitBs: string;
@@ -39,29 +41,23 @@ type LineaCot = {
   puntoTope: number | null;
 };
 
-type CotResumen = {
-  id: number;
-  fecha: string;
-  total_bs: string;
-  total_usd: string;
-  cliente_nombre: string | null;
-  lineas: number;
-};
-
 function nuevaLinea(p: ProductoCatalogoCot): LineaCot {
   const lista = p.precio_venta_lista_bs != null && p.precio_venta_lista_bs !== "" ? Number(p.precio_venta_lista_bs) : null;
   const tope = p.punto_tope != null && p.punto_tope !== "" ? Number(p.punto_tope) : null;
-  const precioIni =
-    lista !== null && Number.isFinite(lista) && lista > 0 ? String(Math.round(lista * 100) / 100) : "";
+  const listaOk = lista !== null && Number.isFinite(lista) && lista > 0 ? round2(lista) : null;
+  const topeOk = tope !== null && Number.isFinite(tope) && tope > 0 ? round2(tope) : null;
+  const precioIni = defaultPrecioUnitBsStr({ precio_venta_lista_bs: listaOk });
   return {
     key: typeof crypto !== "undefined" ? crypto.randomUUID() : String(Math.random()),
     productoId: p.id,
     codigo: p.codigo,
+    codigoPieza: p.codigo_pieza?.trim() ? p.codigo_pieza.trim() : null,
+    medida: p.medida?.trim() ? p.medida.trim() : null,
     nombre: p.nombre,
     cantidad: "1",
     precioUnitBs: precioIni,
-    precioListaBs: lista !== null && Number.isFinite(lista) && lista > 0 ? lista : null,
-    puntoTope: tope !== null && Number.isFinite(tope) && tope > 0 ? tope : null,
+    precioListaBs: listaOk,
+    puntoTope: topeOk,
   };
 }
 
@@ -83,19 +79,118 @@ function parsePrecio(s: string, lista: number | null): number | null {
   return Number.isFinite(n) && n > 0 ? round2(n) : null;
 }
 
+/** Solo dígitos y un separador decimal (coma o punto → un solo punto). */
+function sanitizePrecioUnitBsDigitos(raw: string): string {
+  const s = raw.replace(/,/g, ".");
+  let out = "";
+  let dot = false;
+  for (const ch of s) {
+    if (ch >= "0" && ch <= "9") {
+      out += ch;
+      continue;
+    }
+    if (ch === "." && !dot) {
+      out += ".";
+      dot = true;
+    }
+  }
+  return out;
+}
+
+/** Igual que nueva venta: intervalo entre lista y tope, o solo uno si falta el otro. */
+function precioUnitBsBounds(lista: number | null, tope: number | null): { lo: number | null; hi: number | null } {
+  const interval = rangoPrecioListaTopeBs(lista, tope);
+  if (interval) {
+    return { lo: round2(interval.lo), hi: round2(interval.hi) };
+  }
+  const listaOk = lista != null && Number.isFinite(lista) && lista > 0 ? round2(lista) : null;
+  const topeOk = tope != null && Number.isFinite(tope) && tope > 0 ? round2(tope) : null;
+  if (listaOk != null) return { lo: listaOk, hi: null };
+  if (topeOk != null) return { lo: null, hi: topeOk };
+  return { lo: null, hi: null };
+}
+
+function precioUnitLineaEfectivo(ln: LineaCot): number | null {
+  const p = parsePrecio(ln.precioUnitBs, ln.precioListaBs);
+  if (p === null) return null;
+  const { lo, hi } = precioUnitBsBounds(ln.precioListaBs, ln.puntoTope);
+  let v = p;
+  if (hi != null) v = Math.min(v, hi);
+  if (lo != null) v = Math.max(v, lo);
+  return v;
+}
+
+function defaultPrecioUnitBsStr(p: { precio_venta_lista_bs: number | null }): string {
+  const lista = p.precio_venta_lista_bs;
+  if (lista != null && Number.isFinite(lista) && lista > 0) {
+    return String(round2(lista));
+  }
+  return "";
+}
+
+function clampPrecioUnitBsInput(raw: string, lista: number | null, tope: number | null): string {
+  const cleaned = sanitizePrecioUnitBsDigitos(raw);
+  const t = cleaned.trim();
+  if (t === "" || t === ".") return t;
+
+  if (/^\d+\.$/.test(t)) {
+    return t;
+  }
+
+  const n = Number(t);
+  if (!Number.isFinite(n) || n < 0) return "";
+
+  let v = round2(n);
+  const { hi } = precioUnitBsBounds(lista, tope);
+  if (hi != null) v = Math.min(v, hi);
+  if (v <= 0) return "";
+
+  return String(v);
+}
+
+function snapPrecioUnitBsToRange(raw: string, lista: number | null, tope: number | null): string {
+  const cleaned = sanitizePrecioUnitBsDigitos(raw);
+  const t = cleaned.trim();
+  if (t === "" || t === ".") {
+    return defaultPrecioUnitBsStr({ precio_venta_lista_bs: lista });
+  }
+  const parseT = t.endsWith(".") ? t.slice(0, -1) : t;
+  const n = Number(parseT);
+  if (!Number.isFinite(n) || n <= 0) {
+    return defaultPrecioUnitBsStr({ precio_venta_lista_bs: lista });
+  }
+  let v = round2(n);
+  const { lo, hi } = precioUnitBsBounds(lista, tope);
+  if (hi != null) v = Math.min(v, hi);
+  if (lo != null) v = Math.max(v, lo);
+  return String(v);
+}
+
 function subtotalLineaBs(ln: LineaCot): number | null {
   const q = parseQty(ln.cantidad);
   if (q < 1) return null;
-  const p = parsePrecio(ln.precioUnitBs, ln.precioListaBs);
+  const p = precioUnitLineaEfectivo(ln);
   if (p === null) return null;
   return round2(q * p);
+}
+
+function normalizarTextoLectorCodigo(s: string) {
+  return s.replace(/[\u200B-\u200D\uFEFF]/g, "").replace(/[\u0000-\u001F\u007F]/g, "");
+}
+
+/** Escapa texto para insertar en HTML de la ventana de impresión. */
+function escHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 const PER_PAGE = 50;
 
 export function CotizacionesPanel() {
   const [tipoCambio, setTipoCambio] = useState<{ id: number; valor_bs_por_usd: number } | null>(null);
-  const [historial, setHistorial] = useState<CotResumen[]>([]);
   const [sucursalNombre, setSucursalNombre] = useState("");
   const [ctxLoading, setCtxLoading] = useState(true);
 
@@ -105,17 +200,13 @@ export function CotizacionesPanel() {
   const [filasCatalogo, setFilasCatalogo] = useState<ProductoCatalogoCot[]>([]);
   const [catalogLoading, setCatalogLoading] = useState(false);
 
-  const [busquedaCodigo, setBusquedaCodigo] = useState("");
+  const [busquedaCodigoBarra, setBusquedaCodigoBarra] = useState("");
   const [busquedaGeneral, setBusquedaGeneral] = useState("");
   const [buscando, setBuscando] = useState(false);
 
   const [lineas, setLineas] = useState<LineaCot[]>([]);
-  const [clienteNombre, setClienteNombre] = useState("");
-  const [clienteNit, setClienteNit] = useState("");
-  const [notas, setNotas] = useState("");
 
   const [msg, setMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
-  const [guardando, setGuardando] = useState(false);
 
   /** Evita que una respuesta tardía del listado paginado pise resultados de búsqueda (u otra petición). */
   const catalogoReqSeqRef = useRef(0);
@@ -126,7 +217,6 @@ export function CotizacionesPanel() {
       const res = await fetch("/api/vendedor/cotizaciones", { cache: "no-store" });
       const data = (await res.json()) as {
         tipoCambio?: { id: number; valor_bs_por_usd: number } | null;
-        cotizaciones?: CotResumen[];
         sucursalNombre?: string;
         error?: string;
       };
@@ -135,7 +225,6 @@ export function CotizacionesPanel() {
         return;
       }
       setTipoCambio(data.tipoCambio ?? null);
-      setHistorial(data.cotizaciones ?? []);
       setSucursalNombre(data.sucursalNombre?.trim() ?? "");
     } catch {
       setMsg({ type: "err", text: "Error de red al cargar cotizaciones." });
@@ -191,8 +280,8 @@ export function CotizacionesPanel() {
     }
   }, [vista, page, cargarPagina]);
 
-  const buscarPorCodigo = useCallback(async () => {
-    const t = busquedaCodigo.trim();
+  const buscarPorCodigoBarra = useCallback(async () => {
+    const t = normalizarTextoLectorCodigo(busquedaCodigoBarra).trim();
     if (!t) {
       catalogoReqSeqRef.current += 1;
       setBuscando(false);
@@ -214,7 +303,7 @@ export function CotizacionesPanel() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "same-origin",
-        body: JSON.stringify({ codigo: t, perPage: 80 }),
+        body: JSON.stringify({ codigoBarra: t, perPage: 80 }),
       });
       const data = (await res.json()) as {
         productos?: ProductoCatalogoCot[];
@@ -239,7 +328,7 @@ export function CotizacionesPanel() {
         setBuscando(false);
       }
     }
-  }, [busquedaCodigo]);
+  }, [busquedaCodigoBarra]);
 
   const buscarPorGeneral = useCallback(async () => {
     const t = busquedaGeneral.trim();
@@ -299,7 +388,7 @@ export function CotizacionesPanel() {
       return [...prev, nuevaLinea(p)];
     });
     if (vista === "busqueda" && agregado) {
-      setBusquedaCodigo("");
+      setBusquedaCodigoBarra("");
       setBusquedaGeneral("");
       setFilasCatalogo([]);
       setCatalogTotal(0);
@@ -317,77 +406,128 @@ export function CotizacionesPanel() {
     return { bs, usd, tc };
   }, [lineas, tipoCambio]);
 
+  const imprimirCotizacion = useCallback(() => {
+    if (lineas.length === 0) return;
+    if (typeof document === "undefined") return;
+
+    const fechaStr = new Date().toLocaleString("es-BO", formatoMostrarFechaHoraBo);
+    const { bs, usd, tc } = totales;
+    const metaRows: { k: string; v: string }[] = [{ k: "Fecha", v: fechaStr }];
+    if (sucursalNombre.trim()) metaRows.push({ k: "Sucursal", v: sucursalNombre.trim() });
+    metaRows.push(
+      { k: "Tipo cambio (Bs/USD)", v: tipoCambio != null ? String(tipoCambio.valor_bs_por_usd) : "—" },
+      { k: "Total Bs", v: bs.toFixed(2) },
+      { k: "Total USD (referencia)", v: tc > 0 ? String(usd) : "—" }
+    );
+    const metaHtml = metaRows
+      .map(
+        ({ k, v }) =>
+          `<tr><th style="text-align:left;padding:6px 10px;border:1px solid #ccc;width:200px;background:#f3f4f6">${escHtml(k)}</th><td style="padding:6px 10px;border:1px solid #ccc">${escHtml(v)}</td></tr>`
+      )
+      .join("");
+    const bodyRows = lineas
+      .map((ln) => {
+        const q = parseQty(ln.cantidad);
+        const unit = precioUnitLineaEfectivo(ln);
+        const sub = subtotalLineaBs(ln);
+        const pieza = ln.codigoPieza?.trim() || "—";
+        const med = ln.medida?.trim() || "—";
+        return `<tr>
+          <td style="padding:10px 12px;border:1px solid #ccc">${escHtml(pieza)}</td>
+          <td style="padding:10px 12px;border:1px solid #ccc">${escHtml(med)}</td>
+          <td style="padding:10px 12px;border:1px solid #ccc">${escHtml(ln.nombre)}</td>
+          <td style="padding:10px 12px;border:1px solid #ccc;text-align:right;font-variant-numeric:tabular-nums">${q}</td>
+          <td style="padding:10px 12px;border:1px solid #ccc;text-align:right;font-variant-numeric:tabular-nums">${unit != null ? unit.toFixed(2) : "—"}</td>
+          <td style="padding:10px 12px;border:1px solid #ccc;text-align:right;font-variant-numeric:tabular-nums">${sub != null ? sub.toFixed(2) : "—"}</td>
+        </tr>`;
+      })
+      .join("");
+    const doc = `<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>${escHtml(fechaStr)}</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 0; padding: 28px; color: #111; font-size: 16px; line-height: 1.5; }
+    .meta { width: 100%; border-collapse: collapse; margin-bottom: 24px; max-width: 760px; font-size: 15px; }
+    .items { width: 100%; border-collapse: collapse; font-size: 15px; }
+    .items th { background: #f3f4f6; font-weight: 600; text-align: left; padding: 12px 14px; border: 1px solid #ccc; }
+    .items td { padding: 12px 14px; }
+    .items th.num { text-align: right; }
+    @media print {
+      body { padding: 14px; font-size: 15px; }
+      .items th, .items td { padding: 10px 12px; font-size: 14px; }
+    }
+  </style>
+</head>
+<body>
+  <table class="meta">${metaHtml}</table>
+  <table class="items">
+    <thead>
+      <tr>
+        <th>Cód. pieza</th>
+        <th>Medida</th>
+        <th>Producto</th>
+        <th class="num">Cant.</th>
+        <th class="num">P. unitario Bs</th>
+        <th class="num">Subtotal Bs</th>
+      </tr>
+    </thead>
+    <tbody>${bodyRows}</tbody>
+  </table>
+</body>
+</html>`;
+
+    const blob = new Blob([doc], { type: "text/html;charset=utf-8" });
+    const objectUrl = URL.createObjectURL(blob);
+    const w = globalThis.window?.open(objectUrl, "_blank");
+    if (!w) {
+      URL.revokeObjectURL(objectUrl);
+      setMsg({ type: "err", text: "No se pudo abrir la ventana de impresión (¿bloqueador de ventanas?)." });
+      return;
+    }
+
+    const teardown = () => {
+      try {
+        URL.revokeObjectURL(objectUrl);
+      } catch {
+        /* ignore */
+      }
+      try {
+        w.close();
+      } catch {
+        /* ignore */
+      }
+    };
+
+    w.addEventListener(
+      "afterprint",
+      () => {
+        globalThis.setTimeout(teardown, 200);
+      },
+      { once: true }
+    );
+
+    const doPrint = () => {
+      try {
+        w.focus();
+        w.print();
+      } catch {
+        setMsg({ type: "err", text: "No se pudo abrir el cuadro de impresión." });
+        teardown();
+      }
+    };
+
+    if (w.document.readyState === "complete") {
+      globalThis.setTimeout(doPrint, 100);
+    } else {
+      w.addEventListener("load", () => globalThis.setTimeout(doPrint, 100), { once: true });
+    }
+  }, [lineas, tipoCambio, sucursalNombre, totales]);
+
   const totalPaginas = Math.max(1, Math.ceil(catalogTotal / PER_PAGE));
-
-  async function guardarCotizacion() {
-    setMsg(null);
-    if (!tipoCambio) {
-      setMsg({ type: "err", text: "No hay tipo de cambio: no se puede cotizar." });
-      return;
-    }
-    if (lineas.length === 0) {
-      setMsg({ type: "err", text: "Agregá al menos un producto a la cotización." });
-      return;
-    }
-    const payloadLineas = [];
-    for (const ln of lineas) {
-      const q = parseQty(ln.cantidad);
-      if (q < 1) {
-        setMsg({ type: "err", text: `Cantidad inválida para ${ln.codigo}.` });
-        return;
-      }
-      const p = parsePrecio(ln.precioUnitBs, ln.precioListaBs);
-      if (p === null) {
-        setMsg({ type: "err", text: `Definí precio en Bs para ${ln.codigo}.` });
-        return;
-      }
-      const rango = rangoPrecioListaTopeBs(ln.precioListaBs, ln.puntoTope);
-      if (rango && (p < rango.lo || p > rango.hi)) {
-        setMsg({
-          type: "err",
-          text: `${ln.codigo}: el precio debe estar entre ${rango.lo.toFixed(2)} y ${rango.hi.toFixed(2)} Bs.`,
-        });
-        return;
-      }
-      if (!rango && ln.puntoTope !== null && p > ln.puntoTope) {
-        setMsg({ type: "err", text: `${ln.codigo}: el precio supera el tope (${ln.puntoTope.toFixed(2)} Bs).` });
-        return;
-      }
-      payloadLineas.push({ productoId: ln.productoId, cantidad: q, precioUnitarioBs: p });
-    }
-
-    setGuardando(true);
-    try {
-      const res = await fetch("/api/vendedor/cotizaciones", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "same-origin",
-        body: JSON.stringify({
-          tipoCambioId: tipoCambio.id,
-          tipoCambioSnapshot: tipoCambio.valor_bs_por_usd,
-          clienteNombre: clienteNombre.trim() || null,
-          clienteNit: clienteNit.trim() || null,
-          notas: notas.trim() || null,
-          lineas: payloadLineas,
-        }),
-      });
-      const data = (await res.json()) as { cotizacionId?: number; error?: string };
-      if (!res.ok) {
-        setMsg({ type: "err", text: data.error ?? "No se pudo guardar." });
-        return;
-      }
-      setMsg({ type: "ok", text: `Cotización #${data.cotizacionId} guardada.` });
-      setLineas([]);
-      setClienteNombre("");
-      setClienteNit("");
-      setNotas("");
-      void loadContext();
-    } catch {
-      setMsg({ type: "err", text: "Error de red al guardar." });
-    } finally {
-      setGuardando(false);
-    }
-  }
 
   if (ctxLoading) {
     return (
@@ -418,7 +558,7 @@ export function CotizacionesPanel() {
           <div>
             <h2 className="text-sm font-semibold text-white">Tipo de cambio (referencia)</h2>
             <p className="mt-0.5 text-xs text-slate-500">
-              Los importes en USD de la cotización usan este valor al momento de guardar.
+              Los importes en USD de la cotización usan este valor como referencia (también en la hoja de impresión).
             </p>
           </div>
           {tipoCambio ? (
@@ -433,39 +573,29 @@ export function CotizacionesPanel() {
 
       <div className="rounded-2xl border border-white/10 bg-slate-900/50 p-4">
         <h2 className="text-sm font-semibold text-white">Buscar producto</h2>
-        <p className="mt-1 text-xs text-slate-500">
-          <span className="font-medium text-slate-400">Código de barra / QR:</span> solo el{" "}
-          <span className="text-slate-300">código interno</span> de la etiqueta o el{" "}
-          <span className="text-slate-300">texto del QR</span> (coincidencia exacta, pensado para lector).{" "}
-          <span className="font-medium text-slate-400">Texto (todo):</span> ahí va código pieza, nombre, descripción y
-          el resto del catálogo amplio.
-        </p>
-        <p className="mt-2 text-xs text-slate-500">
-          También podés recorrer <span className="text-slate-300">todos los productos activos</span> por páginas (abajo)
-          sin usar los buscadores.
-        </p>
         <div className="mt-3 grid gap-3 sm:grid-cols-2">
           <div className="min-w-0">
-            <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-              Código de barra o QR (lector)
+            <label className="block text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+              Código de barra o QR (como ingreso de compra)
             </label>
             <div className="mt-1 flex flex-col gap-2 sm:flex-row sm:items-stretch">
               <input
-                value={busquedaCodigo}
-                onChange={(e) => setBusquedaCodigo(e.target.value)}
+                value={busquedaCodigoBarra}
+                onChange={(e) => setBusquedaCodigoBarra(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") {
                     e.preventDefault();
-                    void buscarPorCodigo();
+                    void buscarPorCodigoBarra();
                   }
                 }}
                 className={`${inpCatalogoBuscar} font-mono sm:min-w-0 sm:flex-1`}
-                placeholder="Escaneá o pegá código interno o QR"
+                placeholder="código interno"
+                autoComplete="off"
               />
               <button
                 type="button"
-                onClick={() => void buscarPorCodigo()}
-                disabled={buscando || !busquedaCodigo.trim()}
+                onClick={() => void buscarPorCodigoBarra()}
+                disabled={buscando || !normalizarTextoLectorCodigo(busquedaCodigoBarra).trim()}
                 className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {buscando ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Search className="h-4 w-4" aria-hidden />}
@@ -474,7 +604,7 @@ export function CotizacionesPanel() {
             </div>
           </div>
           <div className="min-w-0">
-            <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Texto (todo)</label>
+            <label className="block text-[10px] font-semibold uppercase tracking-wide text-slate-500">Búsqueda en catálogo</label>
             <div className="mt-1 flex flex-col gap-2 sm:flex-row sm:items-stretch">
               <input
                 value={busquedaGeneral}
@@ -486,7 +616,7 @@ export function CotizacionesPanel() {
                   }
                 }}
                 className={`${inpCatalogoBuscar} sm:min-w-0 sm:flex-1`}
-                placeholder="Palabras en código, nombre, descripción…"
+                placeholder="Código, nombre, descripción, código pieza…"
               />
               <button
                 type="button"
@@ -507,7 +637,7 @@ export function CotizacionesPanel() {
               catalogoReqSeqRef.current += 1;
               setBuscando(false);
               setCatalogLoading(false);
-              setBusquedaCodigo("");
+              setBusquedaCodigoBarra("");
               setBusquedaGeneral("");
               setFilasCatalogo([]);
               setCatalogTotal(0);
@@ -597,56 +727,42 @@ export function CotizacionesPanel() {
       </div>
 
       <div className="rounded-2xl border border-white/10 bg-slate-900/50 p-4">
-        <h2 className="text-sm font-semibold text-white">Datos del cliente (opcional)</h2>
-        <div className="mt-3 grid gap-3 sm:grid-cols-2">
-          <div>
-            <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Nombre / razón social</label>
-            <input className={`${inp} mt-1`} value={clienteNombre} onChange={(e) => setClienteNombre(e.target.value)} />
-          </div>
-          <div>
-            <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">NIT</label>
-            <input className={`${inp} mt-1 font-mono`} value={clienteNit} onChange={(e) => setClienteNit(e.target.value)} />
-          </div>
-          <div className="sm:col-span-2">
-            <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Notas</label>
-            <textarea
-              className={`${inp} mt-1 min-h-[72px] resize-y`}
-              value={notas}
-              onChange={(e) => setNotas(e.target.value)}
-              placeholder="Condiciones, validez, observaciones…"
-            />
-          </div>
-        </div>
-      </div>
-
-      <div className="rounded-2xl border border-white/10 bg-slate-900/50 p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="text-sm font-semibold text-white">Líneas de la cotización</h2>
             <p className="mt-0.5 text-xs text-slate-500">
-              Ajustá cantidades y precio unitario en Bs. Se valida contra el tope del producto si existe.
+              El precio unitario se carga con lista; solo números; debe quedar entre el menor y el mayor de precio de lista y
+              P. tope (igual que en nueva venta). Al salir del campo se ajusta a ese rango. Podés{" "}
+              <span className="text-slate-400">imprimir</span> una versión para papel (sin código interno, lista ni tope;
+              incluye cód. pieza y medida).
             </p>
           </div>
-          <button
-            type="button"
-            disabled={guardando || !tipoCambio || lineas.length === 0}
-            onClick={() => void guardarCotizacion()}
-            className="inline-flex items-center gap-2 rounded-xl bg-amber-500 px-4 py-2 text-sm font-semibold text-slate-950 shadow hover:bg-amber-400 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            {guardando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-            Guardar cotización
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              disabled={lineas.length === 0}
+              onClick={() => imprimirCotizacion()}
+              className="inline-flex items-center gap-2 rounded-xl border border-slate-400/40 bg-white px-4 py-2 text-sm font-semibold text-slate-900 shadow hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <Printer className="h-4 w-4" aria-hidden />
+              Imprimir cotización
+            </button>
+          </div>
         </div>
 
         {lineas.length > 0 ? (
           <div className="mt-4 overflow-x-auto">
-            <table className="w-full min-w-[640px] text-left text-xs">
+            <table className="w-full min-w-[920px] text-left text-xs">
               <thead className="border-b border-white/10 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
                 <tr>
                   <th className="py-2 pr-2">Código</th>
+                  <th className="py-2 pr-2">Cód. pieza</th>
+                  <th className="py-2 pr-2">Medida</th>
                   <th className="py-2 pr-2">Producto</th>
                   <th className="py-2 pr-2">Cant.</th>
-                  <th className="py-2 pr-2">P. unit. Bs</th>
+                  <th className="py-2 pr-2 text-right">Lista Bs</th>
+                  <th className="py-2 pr-2 text-right">P. unit. Bs</th>
+                  <th className="py-2 pr-2 text-right">P. tope</th>
                   <th className="py-2 pr-2 text-right">Subtotal Bs</th>
                   <th className="w-10 py-2" />
                 </tr>
@@ -657,7 +773,11 @@ export function CotizacionesPanel() {
                   return (
                     <tr key={ln.key} className="border-b border-white/5">
                       <td className="py-2 pr-2 font-mono text-amber-200/90">{ln.codigo}</td>
-                      <td className="max-w-[220px] py-2 pr-2 text-slate-200">
+                      <td className="max-w-[120px] py-2 pr-2 font-mono text-slate-400">
+                        {ln.codigoPieza?.trim() || "—"}
+                      </td>
+                      <td className="max-w-[80px] py-2 pr-2 font-mono text-slate-400">{ln.medida?.trim() || "—"}</td>
+                      <td className="max-w-[200px] py-2 pr-2 text-slate-200">
                         <span className="line-clamp-2">{ln.nombre}</span>
                       </td>
                       <td className="py-2 pr-2">
@@ -671,16 +791,68 @@ export function CotizacionesPanel() {
                           }
                         />
                       </td>
-                      <td className="py-2 pr-2">
-                        <input
-                          className={`${inpNum} w-28`}
-                          value={ln.precioUnitBs}
-                          onChange={(e) =>
-                            setLineas((prev) =>
-                              prev.map((x) => (x.key === ln.key ? { ...x, precioUnitBs: e.target.value } : x))
-                            )
-                          }
-                        />
+                      <td className="py-2 pr-2 text-right font-mono text-slate-400">
+                        {ln.precioListaBs != null ? ln.precioListaBs.toFixed(2) : "—"}
+                      </td>
+                      <td className="py-2 pr-2 text-right">
+                        <div className="flex flex-col items-end gap-0.5">
+                          <input
+                            className={`${inpNum} w-full max-w-[7.5rem] text-right`}
+                            type="text"
+                            inputMode="decimal"
+                            autoComplete="off"
+                            placeholder={ln.precioListaBs != null ? ln.precioListaBs.toFixed(2) : "—"}
+                            value={ln.precioUnitBs}
+                            onKeyDown={(e) => {
+                              if (e.ctrlKey || e.metaKey || e.altKey) return;
+                              if (e.key.length !== 1) return;
+                              if (/[0-9.,]/.test(e.key)) return;
+                              e.preventDefault();
+                            }}
+                            onChange={(e) =>
+                              setLineas((prev) =>
+                                prev.map((x) =>
+                                  x.key === ln.key
+                                    ? {
+                                        ...x,
+                                        precioUnitBs: clampPrecioUnitBsInput(
+                                          e.target.value,
+                                          x.precioListaBs,
+                                          x.puntoTope
+                                        ),
+                                      }
+                                    : x
+                                )
+                              )
+                            }
+                            onBlur={() =>
+                              setLineas((prev) =>
+                                prev.map((x) =>
+                                  x.key === ln.key
+                                    ? {
+                                        ...x,
+                                        precioUnitBs: snapPrecioUnitBsToRange(
+                                          x.precioUnitBs,
+                                          x.precioListaBs,
+                                          x.puntoTope
+                                        ),
+                                      }
+                                    : x
+                                )
+                              )
+                            }
+                          />
+                          {ln.precioListaBs != null &&
+                          Number.isFinite(ln.precioListaBs) &&
+                          ln.precioListaBs > 0 ? (
+                            <span className="max-w-[10rem] text-right text-[10px] font-mono leading-tight tabular-nums text-slate-500">
+                              precioVenta ({ln.precioListaBs.toFixed(2)} Bs)
+                            </span>
+                          ) : null}
+                        </div>
+                      </td>
+                      <td className="py-2 pr-2 text-right font-mono text-amber-100/85">
+                        {ln.puntoTope != null ? ln.puntoTope.toFixed(2) : "—"}
                       </td>
                       <td className="py-2 pr-2 text-right font-mono text-slate-200">
                         {sub !== null ? sub.toFixed(2) : "—"}
@@ -714,31 +886,6 @@ export function CotizacionesPanel() {
             ) : null}
           </div>
         </div>
-      </div>
-
-      <div className="rounded-2xl border border-white/10 bg-slate-900/50 p-4">
-        <h2 className="flex items-center gap-2 text-sm font-semibold text-white">
-          <FileText className="h-4 w-4 text-slate-400" />
-          Últimas cotizaciones
-        </h2>
-        {sucursalNombre ? (
-          <p className="mt-1 text-xs text-slate-500">Solo cotizaciones hechas desde vendedores de {sucursalNombre}.</p>
-        ) : null}
-        {historial.length === 0 ? (
-          <p className="mt-2 text-xs text-slate-500">Todavía no hay cotizaciones en tu sucursal.</p>
-        ) : (
-          <ul className="mt-3 divide-y divide-white/10 text-sm">
-            {historial.map((c) => (
-              <li key={c.id} className="flex flex-wrap items-baseline justify-between gap-2 py-2">
-                <span className="font-mono text-slate-300">#{c.id}</span>
-                <span className="text-slate-500">{new Date(c.fecha).toLocaleString("es-BO", formatoMostrarFechaHoraBo)}</span>
-                <span className="min-w-0 flex-1 truncate text-slate-400">{c.cliente_nombre ?? "—"}</span>
-                <span className="font-mono text-slate-200">{c.total_bs} Bs</span>
-                <span className="text-xs text-slate-500">{c.lineas} línea(s)</span>
-              </li>
-            ))}
-          </ul>
-        )}
       </div>
     </div>
   );

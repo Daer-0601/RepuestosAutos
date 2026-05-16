@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { CreditCard, FileText, PlusCircle, ScanLine, ScrollText } from "lucide-react";
+import { CreditCard, FileText, PlusCircle, ScrollText, Users } from "lucide-react";
 import Link from "next/link";
 
 export const metadata: Metadata = {
@@ -22,6 +22,13 @@ const cards = [
     ring: "from-rose-500/15 to-slate-800/10 ring-rose-500/20",
   },
   {
+    href: "/vendedor/clientes",
+    title: "Clientes",
+    desc: "Listado del directorio y alta de nuevos clientes.",
+    icon: Users,
+    ring: "from-teal-500/15 to-slate-800/10 ring-teal-500/25",
+  },
+  {
     href: "/vendedor/cotizaciones",
     title: "Cotizaciones",
     desc: "Presupuestos con el catálogo de productos activos.",
@@ -34,13 +41,6 @@ const cards = [
     desc: "Seguimiento de ventas a crédito y abonos.",
     icon: CreditCard,
     ring: "from-amber-600/15 to-emerald-900/10 ring-amber-500/20",
-  },
-  {
-    href: "/vendedor/productos",
-    title: "Consulta producto",
-    desc: "Buscar por código o QR antes de vender.",
-    icon: ScanLine,
-    ring: "from-slate-500/15 to-amber-900/10 ring-white/10",
   },
 ] as const;
 

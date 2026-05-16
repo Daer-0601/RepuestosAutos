@@ -8,13 +8,14 @@ export const metadata: Metadata = {
 };
 
 export default async function VendedorCotizacionesPage() {
-  const ctx = await requireVendedorContext();
+  await requireVendedorContext();
 
   return (
     <PanelSection
       variant="vendedor"
+      wide
       title="Cotizaciones"
-      description={`Presupuestos con productos activos del catálogo global. Los totales usan el tipo de cambio vigente. Historial: cotizaciones guardadas por vendedores de ${ctx.sucursalNombre}.`}
+      description="Presupuestos con productos activos del catálogo global. Los totales usan el tipo de cambio vigente."
     >
       <CotizacionesPanel />
     </PanelSection>

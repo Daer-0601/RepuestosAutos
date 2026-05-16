@@ -68,3 +68,21 @@ export async function getVendedorStaffContextOrNull(): Promise<PanelStaffContext
     sucursalNombre: suc.nombre,
   };
 }
+
+/** Para rutas API del cajero: mismo contexto que el layout, sin `redirect`. */
+export async function getCajeroStaffContextOrNull(): Promise<PanelStaffContext | null> {
+  const session = await getSession();
+  if (!session || session.rolId !== 2) return null;
+  const u = await getUsuario(session.userId);
+  if (!u || u.activo !== 1) return null;
+  if (u.sucursal_id == null || u.sucursal_id <= 0) return null;
+  const suc = await getSucursal(u.sucursal_id);
+  if (!suc || suc.estado !== "activo") return null;
+  return {
+    userId: session.userId,
+    username: session.username,
+    rolId: session.rolId,
+    sucursalId: u.sucursal_id,
+    sucursalNombre: suc.nombre,
+  };
+}

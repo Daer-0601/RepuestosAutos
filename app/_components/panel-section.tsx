@@ -10,13 +10,16 @@ export function PanelSection({
   variant,
   wide = false,
 }: {
-  title: string;
+  title?: string;
   description?: string;
   children?: React.ReactNode;
   variant: keyof typeof accents;
   /** Pantallas densas (p. ej. POS / salidas): más ancho que el panel estándar. */
   wide?: boolean;
 }) {
+  const hasTitle = Boolean(title?.trim());
+  const hasDescription = Boolean(description?.trim());
+  const showHeader = hasTitle || hasDescription;
   return (
     <div
       className={
@@ -25,14 +28,16 @@ export function PanelSection({
           : "mx-auto max-w-4xl"
       }
     >
-      <h1 className="text-2xl font-semibold tracking-tight text-white sm:text-3xl">
-        {title}
-      </h1>
-      {description ? (
-        <p className="mt-2 text-sm text-slate-400">{description}</p>
+      {hasTitle ? (
+        <h1 className="text-2xl font-semibold tracking-tight text-white sm:text-3xl">
+          {title}
+        </h1>
+      ) : null}
+      {hasDescription ? (
+        <p className={`text-sm text-slate-400 ${hasTitle ? "mt-2" : ""}`}>{description}</p>
       ) : null}
       <div
-        className={`mt-8 rounded-2xl border bg-slate-900/50 p-6 text-sm leading-relaxed text-slate-400 sm:p-8 ${accents[variant]}`}
+        className={`${showHeader ? "mt-8" : ""} rounded-2xl border bg-slate-900/50 p-6 text-sm leading-relaxed text-slate-400 sm:p-8 ${accents[variant]}`}
       >
         {children ?? (
           <p>
