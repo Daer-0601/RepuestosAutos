@@ -8,7 +8,7 @@ import {
 import { VentaCatalogoTabla } from "@/app/vendedor/ventas/nueva/_components/venta-catalogo-tabla";
 import { VentaVendedorToolbar } from "@/app/vendedor/ventas/nueva/_components/venta-vendedor-toolbar";
 import { CATALOGO_FILAS_DEFAULT } from "@/lib/catalogo-productos-constants";
-import { rangoPrecioListaTopeBs } from "@/lib/venta-precio-lista-tope-range";
+import { precioVentaBsPiso, validarPrecioVentaBs } from "@/lib/venta-precio-lista-tope-range";
 import type { ModoCatalogoVenta, ProductoVentaCompletoRow, VentaCatalogoApiRow } from "@/lib/types/venta-vendedor-catalogo";
 import {
   CheckCircle2,
@@ -81,29 +81,8 @@ function sanitizePrecioUnitBsDigitos(raw: string): string {
   return out;
 }
 
-/** Rango [min, max] entre precio de lista y P. tope (ver `rangoPrecioListaTopeBs`). */
-function precioUnitBsBounds(lista: number | null, tope: number | null): { lo: number | null; hi: number | null } {
-  const interval = rangoPrecioListaTopeBs(lista, tope);
-  if (interval) {
-    return { lo: round2(interval.lo), hi: round2(interval.hi) };
-  }
-  const listaOk =
-    lista != null && Number.isFinite(lista) && lista > 0 ? round2(lista) : null;
-  const topeOk =
-    tope != null && Number.isFinite(tope) && tope > 0 ? round2(tope) : null;
-  if (listaOk != null) return { lo: listaOk, hi: null };
-  if (topeOk != null) return { lo: null, hi: topeOk };
-  return { lo: null, hi: null };
-}
-
 function precioUnitLineaEfectivo(ln: VentaCarritoLinea): number | null {
-  const p = parsePrecio(ln.precioUnitBs, ln.producto.precio_venta_lista_bs);
-  if (p === null) return null;
-  const { lo, hi } = precioUnitBsBounds(ln.producto.precio_venta_lista_bs, ln.producto.punto_tope);
-  let v = p;
-  if (hi != null) v = Math.min(v, hi);
-  if (lo != null) v = Math.max(v, lo);
-  return v;
+  return parsePrecio(ln.precioUnitBs, ln.producto.precio_venta_lista_bs);
 }
 
 /** Valor inicial del campo: siempre precio de lista (precioVenta), nunca el tope. */
@@ -115,11 +94,8 @@ function defaultPrecioUnitBsStr(p: { precio_venta_lista_bs: number | null }): st
   return "";
 }
 
-/**
- * Al escribir: solo números y techo (hi); el piso se aplica al salir del campo para poder teclear
- * valores intermedios (p. ej. pasar de 55 a 60 sin que "6" se convierta en 55 al instante).
- */
-function clampPrecioUnitBsInput(raw: string, lista: number | null, tope: number | null): string {
+/** Al escribir: solo números; sin tope superior. El piso (P. tope) se valida al salir del campo. */
+function clampPrecioUnitBsInput(raw: string): string {
   const cleaned = sanitizePrecioUnitBsDigitos(raw);
   const t = cleaned.trim();
   if (t === "" || t === ".") return t;
@@ -131,15 +107,13 @@ function clampPrecioUnitBsInput(raw: string, lista: number | null, tope: number 
   const n = Number(t);
   if (!Number.isFinite(n) || n < 0) return "";
 
-  let v = round2(n);
-  const { hi } = precioUnitBsBounds(lista, tope);
-  if (hi != null) v = Math.min(v, hi);
+  const v = round2(n);
   if (v <= 0) return "";
 
   return String(v);
 }
 
-/** Al blur: ajusta al rango completo [lo, hi]. */
+/** Al blur: vacío o inválido → precio de lista; si hay tope, sube al piso mínimo. */
 function snapPrecioUnitBsToRange(raw: string, lista: number | null, tope: number | null): string {
   const cleaned = sanitizePrecioUnitBsDigitos(raw);
   const t = cleaned.trim();
@@ -152,10 +126,17 @@ function snapPrecioUnitBsToRange(raw: string, lista: number | null, tope: number
     return defaultPrecioUnitBsStr({ precio_venta_lista_bs: lista });
   }
   let v = round2(n);
-  const { lo, hi } = precioUnitBsBounds(lista, tope);
-  if (hi != null) v = Math.min(v, hi);
-  if (lo != null) v = Math.max(v, lo);
+  const piso = precioVentaBsPiso(tope);
+  if (piso != null) v = Math.max(v, piso);
   return String(v);
+}
+
+function parsePrecioUnitBsExplicito(raw: string): number | null {
+  const t = sanitizePrecioUnitBsDigitos(raw).trim();
+  if (!t || t === ".") return null;
+  const parseT = t.endsWith(".") ? t.slice(0, -1) : t;
+  const n = Number(parseT);
+  return Number.isFinite(n) && n > 0 ? round2(n) : null;
 }
 
 function subtotalLineaBs(ln: VentaCarritoLinea): number | null {
@@ -543,21 +524,12 @@ export function NuevaVentaForm() {
         return;
       }
       const precioFinal = precioExplicit ?? precioLista;
-      const tope = ln.producto.punto_tope;
-      const { lo, hi } = precioUnitBsBounds(precioLista, tope);
-      if (precioFinal != null && lo != null && precioFinal < lo) {
-        setMsg({
-          type: "err",
-          text: `${ln.producto.codigo}: el precio debe ser al menos ${lo.toFixed(2)} Bs (rango con lista y tope).`,
-        });
-        return;
-      }
-      if (precioFinal != null && hi != null && precioFinal > hi) {
-        setMsg({
-          type: "err",
-          text: `${ln.producto.codigo}: el precio no puede superar ${hi.toFixed(2)} Bs (rango con lista y tope).`,
-        });
-        return;
+      if (precioFinal != null) {
+        const chk = validarPrecioVentaBs(precioFinal, ln.producto.punto_tope);
+        if (!chk.ok) {
+          window.alert(`${ln.producto.codigo}: ${chk.message}`);
+          return;
+        }
       }
       payloadLineas.push({
         productoId: ln.producto.id,
@@ -865,9 +837,10 @@ export function NuevaVentaForm() {
             <div>
               <h2 className="text-base font-semibold text-white">Líneas de esta venta</h2>
               <p className="text-xs text-slate-500">
-                Ajustá cantidades y precio en Bs si hace falta. El precio se carga con lista; solo números; debe quedar
-                entre el menor y el mayor de <span className="text-slate-400">precioVenta</span> (lista) y{" "}
-                <span className="text-slate-400">P. tope</span>. Al salir del campo, el valor se ajusta a ese rango.
+                Ajustá cantidades y precio en Bs si hace falta. El precio se carga con{" "}
+                <span className="text-slate-400">precioVenta</span> (lista) y podés cobrar por encima; no puede quedar
+                por debajo de <span className="text-slate-400">P. tope</span>. Si es inferior al tope, salta una alerta y el
+                monto se ajusta al piso al salir del campo.
                 Las columnas se redimensionan arrastrando el borde.
               </p>
             </div>
@@ -889,17 +862,23 @@ export function NuevaVentaForm() {
                 x.key === key
                   ? {
                       ...x,
-                      precioUnitBs: clampPrecioUnitBsInput(
-                        value,
-                        x.producto.precio_venta_lista_bs,
-                        x.producto.punto_tope
-                      ),
+                      precioUnitBs: clampPrecioUnitBsInput(value),
                     }
                   : x
               )
             )
           }
-          onPrecioBlur={(key) =>
+          onPrecioBlur={(key) => {
+            const ln = lineas.find((x) => x.key === key);
+            if (ln) {
+              const ingresado = parsePrecioUnitBsExplicito(ln.precioUnitBs);
+              if (ingresado != null) {
+                const chk = validarPrecioVentaBs(ingresado, ln.producto.punto_tope);
+                if (!chk.ok) {
+                  window.alert(chk.message);
+                }
+              }
+            }
             setLineas((prev) =>
               prev.map((x) =>
                 x.key === key
@@ -913,8 +892,8 @@ export function NuevaVentaForm() {
                     }
                   : x
               )
-            )
-          }
+            );
+          }}
           onRemove={(key) => setLineas((prev) => prev.filter((x) => x.key !== key))}
         />
       </section>

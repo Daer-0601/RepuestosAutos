@@ -15,7 +15,7 @@ import { getProducto, listProductoImagenes } from "@/lib/data/productos";
 import { getSucursal, listSucursales } from "@/lib/data/sucursales";
 import { sqlInt } from "@/lib/data/sql-utils";
 import { MYSQL_SESSION_OFFSET, formatDateTimeMysqlBolivia } from "@/lib/fecha-bolivia";
-import { rangoPrecioListaTopeBs } from "@/lib/venta-precio-lista-tope-range";
+import { validarPrecioVentaBs } from "@/lib/venta-precio-lista-tope-range";
 import type {
   ModoCatalogoVenta,
   ProductoVentaCompletoRow,
@@ -403,18 +403,9 @@ async function prepararLineasVenta(
       return { ok: false, message: `Definí precio de venta en Bs para ${p.codigo} (sin lista en catálogo).` };
     }
 
-    const listaPrecio = strNum(p.precio_venta_lista_bs);
-    const tope = strNum(p.punto_tope);
-    const rango = rangoPrecioListaTopeBs(listaPrecio, tope);
-    if (rango) {
-      if (precioBs < rango.lo || precioBs > rango.hi) {
-        return {
-          ok: false,
-          message: `El precio de ${p.codigo} debe estar entre ${rango.lo.toFixed(2)} y ${rango.hi.toFixed(2)} Bs (lista y tope).`,
-        };
-      }
-    } else if (tope !== null && precioBs > tope) {
-      return { ok: false, message: `El precio de ${p.codigo} supera el tope (${tope.toFixed(2)} Bs).` };
+    const chkPrecio = validarPrecioVentaBs(precioBs, strNum(p.punto_tope));
+    if (!chkPrecio.ok) {
+      return { ok: false, message: `${p.codigo}: ${chkPrecio.message}` };
     }
 
     const precioUsd = round4(precioBs / tc);

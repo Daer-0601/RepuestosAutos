@@ -2,7 +2,10 @@ import "server-only";
 
 import { CATALOGO_FILAS_DEFAULT, CATALOGO_FILAS_MAX } from "@/lib/catalogo-productos-constants";
 import { pool } from "@/lib/db";
-import { condicionCodigoQrExacta } from "@/lib/data/producto-codigo-busqueda-exacta";
+import {
+  condicionCodigoQrExacta,
+  normalizarCodigoPiezaProducto,
+} from "@/lib/data/producto-codigo-busqueda-exacta";
 import { sqlInt, sqlOffset } from "@/lib/data/sql-utils";
 import type { RowDataPacket } from "mysql2";
 
@@ -397,7 +400,7 @@ function parseCatalogoFiltrosCore(s: (k: string) => string): CatalogoFiltrosInpu
 
   const codigo = s("codigo").trim();
   const qRaw = s("q").trim();
-  const codigoPiezaRaw = s("codigo_pieza").trim();
+  const codigoPiezaRaw = normalizarCodigoPiezaProducto(s("codigo_pieza")) ?? "";
   /**
    * Un solo criterio “principal” de texto: si hay campo «Código», no mezclar con `q` ni con
    * «Código pieza» en el mismo GET (AND devolvía 0 filas con frecuencia).

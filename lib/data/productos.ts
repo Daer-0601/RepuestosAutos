@@ -1,7 +1,10 @@
 import "server-only";
 
 import { pool } from "@/lib/db";
-import { condicionCodigoQrExacta } from "@/lib/data/producto-codigo-busqueda-exacta";
+import {
+  condicionCodigoQrExacta,
+  normalizarCodigoPiezaProducto,
+} from "@/lib/data/producto-codigo-busqueda-exacta";
 
 /** Quita `.` usado como separador de miles (ej. `1.000` → `1000`). */
 function normalizarCodigoQrProducto(codigo: string, qr_payload: string) {
@@ -70,6 +73,9 @@ export async function searchProductosParaIngreso(
   const like = `%${q}%`;
 
   if (modo === "pieza") {
+    const qPieza = normalizarCodigoPiezaProducto(q) ?? "";
+    if (!qPieza) return [];
+    const likePieza = `%${qPieza}%`;
     const [rows] = await pool.query<RowDataPacket[]>(
       `SELECT id, codigo, codigo_pieza, nombre, qr_payload, medida, marca_auto, especificacion, repuesto, descripcion,
               precio_venta_lista_bs, precio_venta_lista_usd, porcentaje_utilidad, punto_tope
@@ -80,7 +86,7 @@ export async function searchProductosParaIngreso(
          AND codigo_pieza LIKE ?
        ORDER BY (codigo_pieza = ?) DESC, LENGTH(codigo_pieza) ASC, codigo ASC
        LIMIT ${lim}`,
-      [like, q]
+      [likePieza, qPieza]
     );
     return rows as ProductoBusquedaIngresoRow[];
   }
@@ -186,6 +192,7 @@ export async function insertProductoWithConnection(
   input: ProductoInsertInput
 ): Promise<number> {
   const { codigo, qr_payload } = normalizarCodigoQrProducto(input.codigo, input.qr_payload);
+  const codigo_pieza = normalizarCodigoPiezaProducto(input.codigo_pieza);
   const [res] = await conn.execute<ResultSetHeader>(
     `INSERT INTO productos (
       codigo, qr_payload, codigo_pieza, nombre, especificacion, repuesto, procedencia, medida,
@@ -195,7 +202,7 @@ export async function insertProductoWithConnection(
     [
       codigo,
       qr_payload,
-      input.codigo_pieza,
+      codigo_pieza,
       input.nombre,
       input.especificacion,
       input.repuesto,
@@ -325,6 +332,7 @@ export type ProductoUpdateInput = {
 
 export async function updateProducto(id: number, input: ProductoUpdateInput): Promise<void> {
   const { codigo, qr_payload } = normalizarCodigoQrProducto(input.codigo, input.qr_payload);
+  const codigo_pieza = normalizarCodigoPiezaProducto(input.codigo_pieza);
   await pool.execute(
     `UPDATE productos SET
       codigo = ?, qr_payload = ?, codigo_pieza = ?, nombre = ?, especificacion = ?, repuesto = ?,
@@ -334,7 +342,7 @@ export async function updateProducto(id: number, input: ProductoUpdateInput): Pr
     [
       codigo,
       qr_payload,
-      input.codigo_pieza,
+      codigo_pieza,
       input.nombre,
       input.especificacion,
       input.repuesto,
@@ -359,6 +367,7 @@ export async function updateProductoWithConnection(
   input: ProductoUpdateInput
 ): Promise<void> {
   const { codigo, qr_payload } = normalizarCodigoQrProducto(input.codigo, input.qr_payload);
+  const codigo_pieza = normalizarCodigoPiezaProducto(input.codigo_pieza);
   await conn.execute(
     `UPDATE productos SET
       codigo = ?, qr_payload = ?, codigo_pieza = ?, nombre = ?, especificacion = ?, repuesto = ?,
@@ -368,7 +377,7 @@ export async function updateProductoWithConnection(
     [
       codigo,
       qr_payload,
-      input.codigo_pieza,
+      codigo_pieza,
       input.nombre,
       input.especificacion,
       input.repuesto,

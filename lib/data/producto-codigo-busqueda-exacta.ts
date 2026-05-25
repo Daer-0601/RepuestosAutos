@@ -10,6 +10,13 @@ export function normalizarTextoLecturaCodigoBarras(raw: string): string {
     .trim();
 }
 
+/** Quita `.` usado como separador (mismo criterio que `codigo` / `qr_payload` al guardar). */
+export function normalizarCodigoPiezaProducto(raw: string | null | undefined): string | null {
+  if (raw == null) return null;
+  const v = String(raw).replace(/\./g, "").trim();
+  return v === "" ? null : v;
+}
+
 /**
  * Filtro estricto por código interno / QR: solo el valor ingresado (sin LIKE).
  * Si el texto es solo dígitos, también coincide por valor numérico (ej. 1000 = 001000).
