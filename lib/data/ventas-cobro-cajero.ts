@@ -1,7 +1,7 @@
 import "server-only";
 
 import { pool } from "@/lib/db";
-import { formatDateTimeMysqlBolivia } from "@/lib/fecha-bolivia";
+import { MYSQL_SESSION_OFFSET, formatDateTimeMysqlBolivia } from "@/lib/fecha-bolivia";
 import type { TipoPagoVenta } from "@/lib/data/ventas-vendedor";
 import type { RowDataPacket } from "mysql2";
 
@@ -52,59 +52,84 @@ export type VentaPendienteCobroRow = {
   clienteNit: string | null;
   vendedorNombre: string;
   vendedorUsername: string;
+  cajeroAsignadoNombre: string | null;
   cantidadItems: number;
 };
 
-export async function listVentasPendientesCobroCajero(
+/** Todas las ventas pendientes de cobro de la sucursal (sin filtrar por cajero destino). */
+export async function listVentasPendientesCobroSucursal(
   sucursalId: number,
-  cajeroUsuarioId: number,
   opts?: { fechaDesde?: string | null; fechaHasta?: string | null }
 ): Promise<VentaPendienteCobroRow[]> {
   await ensureVentasCobroCajaColumns();
   if (!Number.isFinite(sucursalId) || sucursalId < 1) return [];
-  if (!Number.isFinite(cajeroUsuarioId) || cajeroUsuarioId < 1) return [];
 
-  const params: (string | number)[] = [sucursalId, Math.trunc(cajeroUsuarioId)];
-  let dateClause = "";
-  const d1 = opts?.fechaDesde?.trim();
-  const d2 = opts?.fechaHasta?.trim();
-  if (d1 && /^\d{4}-\d{2}-\d{2}$/.test(d1) && d2 && /^\d{4}-\d{2}-\d{2}$/.test(d2)) {
-    dateClause = "AND DATE(v.fecha) >= ? AND DATE(v.fecha) <= ?";
-    params.push(d1, d2);
-  } else if (d1 && /^\d{4}-\d{2}-\d{2}$/.test(d1)) {
-    dateClause = "AND DATE(v.fecha) = ?";
-    params.push(d1);
+  const conn = await pool.getConnection();
+  try {
+    await conn.query(`SET time_zone = '${MYSQL_SESSION_OFFSET}'`);
+
+    const params: (string | number)[] = [sucursalId];
+    let dateClause = "";
+    const d1 = opts?.fechaDesde?.trim();
+    const d2 = opts?.fechaHasta?.trim();
+    if (d1 && /^\d{4}-\d{2}-\d{2}$/.test(d1) && d2 && /^\d{4}-\d{2}-\d{2}$/.test(d2)) {
+      dateClause = "AND v.fecha >= ? AND v.fecha < DATE_ADD(?, INTERVAL 1 DAY)";
+      params.push(`${d1} 00:00:00`, `${d2} 00:00:00`);
+    } else if (d1 && /^\d{4}-\d{2}-\d{2}$/.test(d1)) {
+      dateClause = "AND v.fecha >= ? AND v.fecha < DATE_ADD(?, INTERVAL 1 DAY)";
+      params.push(`${d1} 00:00:00`, `${d1} 00:00:00`);
+    }
+
+    const [rows] = await conn.execute<RowDataPacket[]>(
+      `SELECT v.id, v.fecha, v.total_bs,
+              COALESCE(NULLIF(TRIM(c.nombre), ''), NULLIF(TRIM(v.cliente_nombre_libre), '')) AS cliente_nombre,
+              NULLIF(TRIM(v.cliente_nit), '') AS cliente_nit,
+              u.nombre_completo AS vendedor_nombre,
+              u.username AS vendedor_username,
+              COALESCE(NULLIF(TRIM(uc.nombre_completo), ''), NULLIF(TRIM(uc.username), '')) AS cajero_asignado,
+              COALESCE(det.n_items, 0) AS n_items
+       FROM ventas v
+       INNER JOIN usuarios u ON u.id = v.usuario_id
+       LEFT JOIN clientes c ON c.id = v.cliente_id
+       LEFT JOIN usuarios uc ON uc.id = v.cajero_destino_usuario_id
+       LEFT JOIN (
+         SELECT venta_id, COUNT(*) AS n_items
+         FROM venta_detalle
+         GROUP BY venta_id
+       ) det ON det.venta_id = v.id
+       WHERE v.sucursal_id = ?
+         AND v.estado = 'confirmada'
+         AND v.estado_cobro = 'pendiente'
+         ${dateClause}
+       ORDER BY v.fecha ASC, v.id ASC`,
+      params
+    );
+
+    return (rows as RowDataPacket[]).map((r) => ({
+      id: Number(r.id),
+      fecha: r.fecha instanceof Date ? formatDateTimeMysqlBolivia(r.fecha) : String(r.fecha ?? ""),
+      totalBs: Number(r.total_bs ?? 0),
+      clienteNombre:
+        r.cliente_nombre != null && String(r.cliente_nombre).trim() !== "" ? String(r.cliente_nombre) : null,
+      clienteNit: r.cliente_nit != null && String(r.cliente_nit).trim() !== "" ? String(r.cliente_nit) : null,
+      vendedorNombre: String(r.vendedor_nombre ?? "").trim() || String(r.vendedor_username ?? ""),
+      vendedorUsername: String(r.vendedor_username ?? ""),
+      cajeroAsignadoNombre:
+        r.cajero_asignado != null && String(r.cajero_asignado).trim() !== "" ? String(r.cajero_asignado) : null,
+      cantidadItems: Number(r.n_items ?? 0),
+    }));
+  } finally {
+    conn.release();
   }
+}
 
-  const [rows] = await pool.execute<RowDataPacket[]>(
-    `SELECT v.id, v.fecha, v.total_bs,
-            COALESCE(NULLIF(TRIM(c.nombre), ''), NULLIF(TRIM(v.cliente_nombre_libre), '')) AS cliente_nombre,
-            NULLIF(TRIM(v.cliente_nit), '') AS cliente_nit,
-            u.nombre_completo AS vendedor_nombre,
-            u.username AS vendedor_username,
-            (SELECT COUNT(*) FROM venta_detalle d WHERE d.venta_id = v.id) AS n_items
-     FROM ventas v
-     INNER JOIN usuarios u ON u.id = v.usuario_id
-     LEFT JOIN clientes c ON c.id = v.cliente_id
-     WHERE v.sucursal_id = ?
-       AND v.estado = 'confirmada'
-       AND v.estado_cobro = 'pendiente'
-       AND v.cajero_destino_usuario_id = ?
-       ${dateClause}
-     ORDER BY v.fecha ASC, v.id ASC`,
-    params
-  );
-
-  return (rows as RowDataPacket[]).map((r) => ({
-    id: Number(r.id),
-    fecha: r.fecha instanceof Date ? formatDateTimeMysqlBolivia(r.fecha) : String(r.fecha ?? ""),
-    totalBs: Number(r.total_bs ?? 0),
-    clienteNombre: r.cliente_nombre != null && String(r.cliente_nombre).trim() !== "" ? String(r.cliente_nombre) : null,
-    clienteNit: r.cliente_nit != null && String(r.cliente_nit).trim() !== "" ? String(r.cliente_nit) : null,
-    vendedorNombre: String(r.vendedor_nombre ?? "").trim() || String(r.vendedor_username ?? ""),
-    vendedorUsername: String(r.vendedor_username ?? ""),
-    cantidadItems: Number(r.n_items ?? 0),
-  }));
+/** @deprecated Usar listVentasPendientesCobroSucursal */
+export async function listVentasPendientesCobroCajero(
+  sucursalId: number,
+  _cajeroUsuarioId: number,
+  opts?: { fechaDesde?: string | null; fechaHasta?: string | null }
+): Promise<VentaPendienteCobroRow[]> {
+  return listVentasPendientesCobroSucursal(sucursalId, opts);
 }
 
 export type VentaDetalleCobroLinea = {
@@ -129,8 +154,7 @@ export type VentaDetalleCobro = {
 
 export async function getVentaPendienteCobroDetalle(
   ventaId: number,
-  sucursalId: number,
-  cajeroUsuarioId: number
+  sucursalId: number
 ): Promise<VentaDetalleCobro | null> {
   await ensureVentasCobroCajaColumns();
   if (!Number.isFinite(ventaId) || ventaId < 1) return null;
@@ -147,9 +171,8 @@ export async function getVentaPendienteCobroDetalle(
        AND v.sucursal_id = ?
        AND v.estado = 'confirmada'
        AND v.estado_cobro = 'pendiente'
-       AND v.cajero_destino_usuario_id = ?
      LIMIT 1`,
-    [ventaId, sucursalId, Math.trunc(cajeroUsuarioId)]
+    [ventaId, sucursalId]
   );
   const v = vrows[0] as RowDataPacket | undefined;
   if (!v) return null;
@@ -214,15 +237,13 @@ export async function registrarCobroVentaCajero(input: {
      WHERE id = ?
        AND sucursal_id = ?
        AND estado = 'confirmada'
-       AND estado_cobro = 'pendiente'
-       AND cajero_destino_usuario_id = ?`,
+       AND estado_cobro = 'pendiente'`,
     [
       input.tipoPago,
       Math.trunc(input.cajeroUsuarioId),
       fechaCobro,
       Math.trunc(input.ventaId),
       input.sucursalId,
-      Math.trunc(input.cajeroUsuarioId),
     ]
   );
 

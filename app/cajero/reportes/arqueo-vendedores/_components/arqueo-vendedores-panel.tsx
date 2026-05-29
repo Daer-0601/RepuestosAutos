@@ -37,12 +37,12 @@ type SalidasDocLinea = {
   fecha: string;
   ventaId: number;
   numeroDocumento: string | null;
-  codigoRepuesto: string;
+  codigo: string;
+  codigoPieza: string;
   medida: string;
   descripcion: string;
   cantidad: number;
   totalLineaBs: number;
-  totalLineaUsd: number;
 };
 
 function formatFechaCelda(iso: string): string {
@@ -301,7 +301,7 @@ export function ArqueoVendedoresPanel({
           fechaDesde?: string;
           fechaHasta?: string;
           lineas?: SalidasDocLinea[];
-          totales?: { totalBs: number; totalUsd: number };
+          totales?: { totalBs: number };
         };
         if (!res.ok) {
           setDocPrintErr(data.error ?? "No se pudo generar el documento.");
@@ -312,7 +312,7 @@ export function ArqueoVendedoresPanel({
         const d1 = data.fechaDesde ?? "";
         const d2 = data.fechaHasta ?? "";
         const lineas = Array.isArray(data.lineas) ? data.lineas : [];
-        const tot = data.totales ?? { totalBs: 0, totalUsd: 0 };
+        const tot = data.totales ?? { totalBs: 0 };
         const periodoLabel = labelPeriodoRango(d1, d2);
         const fechaImp = new Date().toLocaleString("es-BO", formatoMostrarFechaHoraBo);
         const origin = globalThis.window?.location?.origin ?? "";
@@ -324,20 +324,20 @@ export function ArqueoVendedoresPanel({
             : lineas
                 .map((ln) => {
                   const fp = escHtml(formatFechaCelda(ln.fecha));
-                  const cr = escHtml(ln.codigoRepuesto);
+                  const cod = escHtml(ln.codigo);
+                  const cp = escHtml(ln.codigoPieza);
                   const me = escHtml(ln.medida);
                   const de = escHtml(ln.descripcion);
                   const cant = Math.trunc(Number(ln.cantidad)) || 0;
                   const bs = round2(ln.totalLineaBs).toFixed(2);
-                  const us = round4(ln.totalLineaUsd).toFixed(2);
                   return `<tr>
             <td style="padding:6px 8px;border:1px solid #ccc;white-space:nowrap">${fp}</td>
-            <td style="padding:6px 8px;border:1px solid #ccc">${cr}</td>
+            <td style="padding:6px 8px;border:1px solid #ccc;font-family:ui-monospace,monospace;font-size:10px">${cod}</td>
+            <td style="padding:6px 8px;border:1px solid #ccc;font-family:ui-monospace,monospace;font-size:10px">${cp}</td>
             <td style="padding:6px 8px;border:1px solid #ccc;font-size:10px">${me}</td>
             <td style="padding:6px 8px;border:1px solid #ccc;font-size:10px">${de}</td>
             <td style="padding:6px 8px;border:1px solid #ccc;text-align:right;font-variant-numeric:tabular-nums">${cant}</td>
             <td style="padding:6px 8px;border:1px solid #ccc;text-align:right;font-variant-numeric:tabular-nums">${bs}</td>
-            <td style="padding:6px 8px;border:1px solid #ccc;text-align:right;font-variant-numeric:tabular-nums">${us}</td>
           </tr>`;
                 })
                 .join("");
@@ -347,7 +347,6 @@ export function ArqueoVendedoresPanel({
         const vendLine = escHtml(`Vendedor: ${vend.nombreCompleto}${vend.username ? ` (${vend.username})` : ""}`);
         const per = escHtml(`Período: ${periodoLabel}`);
         const totBs = round2(tot.totalBs).toFixed(2);
-        const totUs = round4(tot.totalUsd).toFixed(2);
         const fi = escHtml(fechaImp);
 
         const docHtml = `<!DOCTYPE html>
@@ -395,17 +394,17 @@ export function ArqueoVendedoresPanel({
     <thead>
       <tr>
         <th>Fecha</th>
-        <th>C_REP</th>
+        <th>Código</th>
+        <th>C_PIEZA</th>
         <th>Medida</th>
         <th>Descripción</th>
         <th class="num">Cant.</th>
         <th class="num">S_Bs.</th>
-        <th class="num">S_US</th>
       </tr>
     </thead>
     <tbody>${bodyRows}</tbody>
   </table>
-  <div class="tot">TOTALES: ${escHtml(totBs)} Bs. · ${escHtml(totUs)} USD</div>
+  <div class="tot">TOTAL: ${escHtml(totBs)} Bs.</div>
   <footer class="foot">
     <span>${fi}</span>
     <span>Página 1 de 1</span>

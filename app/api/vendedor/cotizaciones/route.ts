@@ -1,5 +1,7 @@
 import { getVendedorStaffContextOrNull } from "@/lib/auth/staff-panel-context";
 import { crearCotizacionAdmin, listCotizacionesPorSucursal } from "@/lib/data/cotizaciones";
+import { assertCajeroDestinoValido } from "@/lib/data/ventas-cobro-cajero";
+import { listCajerosActivosPorSucursal } from "@/lib/data/usuarios";
 import { getUltimoTipoCambio } from "@/lib/data/tipo-cambio";
 import { revalidatePath } from "next/cache";
 import { NextResponse } from "next/server";
@@ -17,10 +19,12 @@ export async function GET() {
   } catch {
     cotizaciones = [];
   }
+  const cajeros = await listCajerosActivosPorSucursal(ctx.sucursalId);
   return NextResponse.json({
     tipoCambio: ultimo ? { id: ultimo.id, valor_bs_por_usd: ultimo.valor_bs_por_usd } : null,
     cotizaciones,
     sucursalNombre: ctx.sucursalNombre,
+    cajeros,
   });
 }
 
@@ -82,6 +86,19 @@ export async function POST(request: Request) {
   const tipoCambioSnapshot =
     Number.isFinite(tcBodyVal) && tcBodyVal > 0 ? tcBodyVal : ultimo.valor_bs_por_usd;
 
+  const cajeroDestinoRaw = b.cajeroDestinoUsuarioId;
+  const cajeroDestinoUsuarioId =
+    cajeroDestinoRaw === null || cajeroDestinoRaw === undefined || cajeroDestinoRaw === ""
+      ? NaN
+      : Number(cajeroDestinoRaw);
+  if (!Number.isFinite(cajeroDestinoUsuarioId) || cajeroDestinoUsuarioId < 1) {
+    return NextResponse.json({ error: "Elegí el cajero que imprimirá la cotización." }, { status: 400 });
+  }
+  const cajeroOk = await assertCajeroDestinoValido(ctx.sucursalId, Math.trunc(cajeroDestinoUsuarioId));
+  if (!cajeroOk.ok) {
+    return NextResponse.json({ error: cajeroOk.message }, { status: 400 });
+  }
+
   const clienteNombre =
     typeof b.clienteNombre === "string" && b.clienteNombre.trim() ? b.clienteNombre.trim().slice(0, 255) : null;
   const clienteNit = typeof b.clienteNit === "string" && b.clienteNit.trim() ? b.clienteNit.trim().slice(0, 64) : null;
@@ -89,6 +106,7 @@ export async function POST(request: Request) {
 
   const result = await crearCotizacionAdmin({
     usuarioId: ctx.userId,
+    cajeroDestinoUsuarioId: Math.trunc(cajeroDestinoUsuarioId),
     clienteNombre,
     clienteNit,
     notas,
@@ -103,6 +121,7 @@ export async function POST(request: Request) {
 
   revalidatePath("/vendedor/cotizaciones");
   revalidatePath("/vendedor");
+  revalidatePath("/cajero/cotizaciones");
 
   return NextResponse.json({ cotizacionId: result.cotizacionId });
 }

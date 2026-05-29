@@ -6,13 +6,13 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
-function labelEstadoCobro(estado: string, tipoPago: string): string {
-  if (estado === "pendiente") return "Pendiente en caja";
+function labelTipoPago(estadoCobro: string, tipoPago: string): string {
+  if (estadoCobro === "pendiente") return "Pendiente en caja";
   if (tipoPago === "efectivo") return "Efectivo";
   if (tipoPago === "qr") return "QR";
   if (tipoPago === "tarjeta") return "Tarjeta";
   if (tipoPago === "credito") return "Crédito";
-  return estado;
+  return tipoPago;
 }
 
 export async function generateMetadata({
@@ -82,7 +82,6 @@ export default async function VendedorVentasDiaDetallePage({
               <tr>
                 <th className="px-4 py-3 font-medium">Hora</th>
                 <th className="px-4 py-3 font-medium">Pago</th>
-                <th className="px-4 py-3 font-medium">Cobro</th>
                 <th className="px-4 py-3 font-medium">Cliente</th>
                 <th className="px-4 py-3 font-medium text-right">Total Bs</th>
               </tr>
@@ -94,9 +93,8 @@ export default async function VendedorVentasDiaDetallePage({
                     {new Date(r.fecha).toLocaleString("es-BO", formatoMostrarFechaHoraBo)}
                   </td>
                   <td className="px-4 py-3 capitalize">
-                    {r.estado_cobro === "pendiente" ? "—" : r.tipo_pago}
+                    {labelTipoPago(r.estado_cobro, r.tipo_pago)}
                   </td>
-                  <td className="px-4 py-3">{labelEstadoCobro(r.estado_cobro, r.tipo_pago)}</td>
                   <td className="px-4 py-3 text-slate-400">{r.cliente_nombre ?? "—"}</td>
                   <td className="px-4 py-3 text-right font-mono text-slate-200">
                     {Number(r.total_bs).toFixed(2)}

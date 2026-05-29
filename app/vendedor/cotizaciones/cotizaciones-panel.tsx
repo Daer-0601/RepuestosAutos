@@ -1,8 +1,7 @@
 "use client";
 
-import { formatoMostrarFechaHoraBo } from "@/lib/fecha-bolivia";
 import { rangoPrecioListaTopeBs } from "@/lib/venta-precio-lista-tope-range";
-import { Loader2, Plus, Printer, Search, Trash2 } from "lucide-react";
+import { Loader2, Plus, Search, Send, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 const inp =
@@ -178,15 +177,6 @@ function normalizarTextoLectorCodigo(s: string) {
   return s.replace(/[\u200B-\u200D\uFEFF]/g, "").replace(/[\u0000-\u001F\u007F]/g, "");
 }
 
-/** Escapa texto para insertar en HTML de la ventana de impresión. */
-function escHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
 const PER_PAGE = 50;
 
 export function CotizacionesPanel() {
@@ -205,6 +195,12 @@ export function CotizacionesPanel() {
   const [buscando, setBuscando] = useState(false);
 
   const [lineas, setLineas] = useState<LineaCot[]>([]);
+  const [cajeros, setCajeros] = useState<{ id: number; nombreCompleto: string; username: string }[]>([]);
+  const [cajeroDestinoId, setCajeroDestinoId] = useState("");
+  const [clienteNombre, setClienteNombre] = useState("");
+  const [clienteNit, setClienteNit] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [cotizacionEnviada, setCotizacionEnviada] = useState<{ id: number; totalBs: string } | null>(null);
 
   const [msg, setMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
 
@@ -218,6 +214,7 @@ export function CotizacionesPanel() {
       const data = (await res.json()) as {
         tipoCambio?: { id: number; valor_bs_por_usd: number } | null;
         sucursalNombre?: string;
+        cajeros?: { id: number; nombreCompleto: string; username: string }[];
         error?: string;
       };
       if (!res.ok) {
@@ -226,6 +223,12 @@ export function CotizacionesPanel() {
       }
       setTipoCambio(data.tipoCambio ?? null);
       setSucursalNombre(data.sucursalNombre?.trim() ?? "");
+      const listaCajeros = Array.isArray(data.cajeros) ? data.cajeros : [];
+      setCajeros(listaCajeros);
+      setCajeroDestinoId((prev) => {
+        if (prev && listaCajeros.some((c) => String(c.id) === prev)) return prev;
+        return listaCajeros.length === 1 ? String(listaCajeros[0].id) : "";
+      });
     } catch {
       setMsg({ type: "err", text: "Error de red al cargar cotizaciones." });
     } finally {
@@ -406,126 +409,75 @@ export function CotizacionesPanel() {
     return { bs, usd, tc };
   }, [lineas, tipoCambio]);
 
-  const imprimirCotizacion = useCallback(() => {
-    if (lineas.length === 0) return;
-    if (typeof document === "undefined") return;
-
-    const fechaStr = new Date().toLocaleString("es-BO", formatoMostrarFechaHoraBo);
-    const { bs, usd, tc } = totales;
-    const metaRows: { k: string; v: string }[] = [{ k: "Fecha", v: fechaStr }];
-    if (sucursalNombre.trim()) metaRows.push({ k: "Sucursal", v: sucursalNombre.trim() });
-    metaRows.push(
-      { k: "Tipo cambio (Bs/USD)", v: tipoCambio != null ? String(tipoCambio.valor_bs_por_usd) : "—" },
-      { k: "Total Bs", v: bs.toFixed(2) },
-      { k: "Total USD (referencia)", v: tc > 0 ? String(usd) : "—" }
-    );
-    const metaHtml = metaRows
-      .map(
-        ({ k, v }) =>
-          `<tr><th style="text-align:left;padding:6px 10px;border:1px solid #ccc;width:200px;background:#f3f4f6">${escHtml(k)}</th><td style="padding:6px 10px;border:1px solid #ccc">${escHtml(v)}</td></tr>`
-      )
-      .join("");
-    const bodyRows = lineas
-      .map((ln) => {
-        const q = parseQty(ln.cantidad);
-        const unit = precioUnitLineaEfectivo(ln);
-        const sub = subtotalLineaBs(ln);
-        const pieza = ln.codigoPieza?.trim() || "—";
-        const med = ln.medida?.trim() || "—";
-        return `<tr>
-          <td style="padding:10px 12px;border:1px solid #ccc">${escHtml(pieza)}</td>
-          <td style="padding:10px 12px;border:1px solid #ccc">${escHtml(med)}</td>
-          <td style="padding:10px 12px;border:1px solid #ccc">${escHtml(ln.nombre)}</td>
-          <td style="padding:10px 12px;border:1px solid #ccc;text-align:right;font-variant-numeric:tabular-nums">${q}</td>
-          <td style="padding:10px 12px;border:1px solid #ccc;text-align:right;font-variant-numeric:tabular-nums">${unit != null ? unit.toFixed(2) : "—"}</td>
-          <td style="padding:10px 12px;border:1px solid #ccc;text-align:right;font-variant-numeric:tabular-nums">${sub != null ? sub.toFixed(2) : "—"}</td>
-        </tr>`;
-      })
-      .join("");
-    const doc = `<!DOCTYPE html>
-<html lang="es">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>${escHtml(fechaStr)}</title>
-  <style>
-    * { box-sizing: border-box; }
-    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 0; padding: 28px; color: #111; font-size: 16px; line-height: 1.5; }
-    .meta { width: 100%; border-collapse: collapse; margin-bottom: 24px; max-width: 760px; font-size: 15px; }
-    .items { width: 100%; border-collapse: collapse; font-size: 15px; }
-    .items th { background: #f3f4f6; font-weight: 600; text-align: left; padding: 12px 14px; border: 1px solid #ccc; }
-    .items td { padding: 12px 14px; }
-    .items th.num { text-align: right; }
-    @media print {
-      body { padding: 14px; font-size: 15px; }
-      .items th, .items td { padding: 10px 12px; font-size: 14px; }
+  async function enviarACaja() {
+    if (lineas.length === 0) {
+      setMsg({ type: "err", text: "Agregá al menos un producto." });
+      return;
     }
-  </style>
-</head>
-<body>
-  <table class="meta">${metaHtml}</table>
-  <table class="items">
-    <thead>
-      <tr>
-        <th>Cód. pieza</th>
-        <th>Medida</th>
-        <th>Producto</th>
-        <th class="num">Cant.</th>
-        <th class="num">P. unitario Bs</th>
-        <th class="num">Subtotal Bs</th>
-      </tr>
-    </thead>
-    <tbody>${bodyRows}</tbody>
-  </table>
-</body>
-</html>`;
-
-    const blob = new Blob([doc], { type: "text/html;charset=utf-8" });
-    const objectUrl = URL.createObjectURL(blob);
-    const w = globalThis.window?.open(objectUrl, "_blank");
-    if (!w) {
-      URL.revokeObjectURL(objectUrl);
-      setMsg({ type: "err", text: "No se pudo abrir la ventana de impresión (¿bloqueador de ventanas?)." });
+    if (!tipoCambio) {
+      setMsg({ type: "err", text: "No hay tipo de cambio cargado." });
+      return;
+    }
+    if (!cajeroDestinoId.trim()) {
+      setMsg({ type: "err", text: "Elegí el cajero que imprimirá la cotización." });
       return;
     }
 
-    const teardown = () => {
-      try {
-        URL.revokeObjectURL(objectUrl);
-      } catch {
-        /* ignore */
+    const payloadLineas: { productoId: number; cantidad: number; precioUnitarioBs: number }[] = [];
+    for (const ln of lineas) {
+      const q = parseQty(ln.cantidad);
+      if (q < 1) {
+        setMsg({ type: "err", text: `Cantidad inválida para ${ln.codigo}.` });
+        return;
       }
-      try {
-        w.close();
-      } catch {
-        /* ignore */
+      const p = precioUnitLineaEfectivo(ln);
+      if (p === null) {
+        setMsg({ type: "err", text: `Precio inválido para ${ln.codigo}.` });
+        return;
       }
-    };
-
-    w.addEventListener(
-      "afterprint",
-      () => {
-        globalThis.setTimeout(teardown, 200);
-      },
-      { once: true }
-    );
-
-    const doPrint = () => {
-      try {
-        w.focus();
-        w.print();
-      } catch {
-        setMsg({ type: "err", text: "No se pudo abrir el cuadro de impresión." });
-        teardown();
-      }
-    };
-
-    if (w.document.readyState === "complete") {
-      globalThis.setTimeout(doPrint, 100);
-    } else {
-      w.addEventListener("load", () => globalThis.setTimeout(doPrint, 100), { once: true });
+      payloadLineas.push({
+        productoId: ln.productoId,
+        cantidad: q,
+        precioUnitarioBs: p,
+      });
     }
-  }, [lineas, tipoCambio, sucursalNombre, totales]);
+
+    setSubmitting(true);
+    setMsg(null);
+    setCotizacionEnviada(null);
+    try {
+      const res = await fetch("/api/vendedor/cotizaciones", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          cajeroDestinoUsuarioId: Number(cajeroDestinoId),
+          clienteNombre: clienteNombre.trim() || null,
+          clienteNit: clienteNit.trim() || null,
+          tipoCambioId: tipoCambio.id,
+          tipoCambioSnapshot: tipoCambio.valor_bs_por_usd,
+          lineas: payloadLineas,
+        }),
+      });
+      const data = (await res.json()) as { cotizacionId?: number; error?: string };
+      if (!res.ok) {
+        setMsg({ type: "err", text: data.error ?? "No se pudo enviar la cotización a caja." });
+        return;
+      }
+      const cid = data.cotizacionId;
+      if (cid == null || !Number.isFinite(cid)) {
+        setMsg({ type: "err", text: "Respuesta inválida del servidor." });
+        return;
+      }
+      setCotizacionEnviada({ id: cid, totalBs: totales.bs.toFixed(2) });
+      setLineas([]);
+      setClienteNombre("");
+      setClienteNit("");
+    } catch {
+      setMsg({ type: "err", text: "Error de red al enviar." });
+    } finally {
+      setSubmitting(false);
+    }
+  }
 
   const totalPaginas = Math.max(1, Math.ceil(catalogTotal / PER_PAGE));
 
@@ -540,6 +492,16 @@ export function CotizacionesPanel() {
 
   return (
     <div className="space-y-6">
+      {cotizacionEnviada ? (
+        <div
+          className="rounded-xl border border-emerald-500/35 bg-emerald-950/25 px-4 py-3 text-sm text-emerald-100"
+          role="status"
+        >
+          Cotización #{cotizacionEnviada.id} enviada a caja ({cotizacionEnviada.totalBs} Bs). El cajero la imprimirá
+          para el cliente.
+        </div>
+      ) : null}
+
       {msg ? (
         <div
           className={`rounded-xl border px-4 py-3 text-sm ${
@@ -727,26 +689,69 @@ export function CotizacionesPanel() {
       </div>
 
       <div className="rounded-2xl border border-white/10 bg-slate-900/50 p-4">
+        <h2 className="text-sm font-semibold text-white">Cliente y envío a caja</h2>
+        <p className="mt-0.5 text-xs text-slate-500">
+          Armá la cotización; el cajero elegido la imprimirá para el cliente (vos no imprimís desde aquí).
+        </p>
+        <div className="mt-4 flex flex-wrap items-end gap-4">
+          <div className="min-w-[10rem]">
+            <label
+              htmlFor="cot-cajero"
+              className="block text-[10px] font-semibold uppercase tracking-wide text-slate-500"
+            >
+              Cajero
+            </label>
+            <select
+              id="cot-cajero"
+              className={`${inp} mt-1`}
+              value={cajeroDestinoId}
+              onChange={(e) => setCajeroDestinoId(e.target.value)}
+            >
+              <option value="">Elegir cajero…</option>
+              {cajeros.map((c) => (
+                <option key={c.id} value={String(c.id)}>
+                  {c.nombreCompleto}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="min-w-[12rem] flex-1">
+            <label
+              htmlFor="cot-cliente"
+              className="block text-[10px] font-semibold uppercase tracking-wide text-slate-500"
+            >
+              Cliente <span className="font-normal normal-case text-slate-600">(opcional)</span>
+            </label>
+            <input
+              id="cot-cliente"
+              className={`${inp} mt-1`}
+              value={clienteNombre}
+              onChange={(e) => setClienteNombre(e.target.value)}
+              placeholder="Nombre o razón social"
+            />
+          </div>
+          <div className="min-w-[8rem]">
+            <label htmlFor="cot-nit" className="block text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+              NIT <span className="font-normal normal-case text-slate-600">(opcional)</span>
+            </label>
+            <input
+              id="cot-nit"
+              className={`${inp} mt-1 font-mono`}
+              value={clienteNit}
+              onChange={(e) => setClienteNit(e.target.value)}
+            />
+          </div>
+        </div>
+      </div>
+
+      <div className="rounded-2xl border border-white/10 bg-slate-900/50 p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="text-sm font-semibold text-white">Líneas de la cotización</h2>
             <p className="mt-0.5 text-xs text-slate-500">
               El precio unitario se carga con lista; solo números; debe quedar entre el menor y el mayor de precio de lista y
-              P. tope (igual que en nueva venta). Al salir del campo se ajusta a ese rango. Podés{" "}
-              <span className="text-slate-400">imprimir</span> una versión para papel (sin código interno, lista ni tope;
-              incluye cód. pieza y medida).
+              P. tope (igual que en nueva venta).
             </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              disabled={lineas.length === 0}
-              onClick={() => imprimirCotizacion()}
-              className="inline-flex items-center gap-2 rounded-xl border border-slate-400/40 bg-white px-4 py-2 text-sm font-semibold text-slate-900 shadow hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              <Printer className="h-4 w-4" aria-hidden />
-              Imprimir cotización
-            </button>
           </div>
         </div>
 
@@ -885,6 +890,17 @@ export function CotizacionesPanel() {
               <p className="mt-1 font-mono text-sm text-slate-400">≈ {totales.usd.toFixed(4)} USD</p>
             ) : null}
           </div>
+          <button
+            type="button"
+            disabled={
+              submitting || lineas.length === 0 || !tipoCambio || !cajeroDestinoId.trim() || cajeros.length === 0
+            }
+            onClick={() => void enviarACaja()}
+            className="inline-flex items-center gap-2 rounded-xl bg-amber-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-amber-500 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {submitting ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Send className="h-4 w-4" aria-hidden />}
+            Enviar a caja
+          </button>
         </div>
       </div>
     </div>

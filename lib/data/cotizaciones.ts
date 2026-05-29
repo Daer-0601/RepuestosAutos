@@ -1,6 +1,7 @@
 import "server-only";
 
 import { pool } from "@/lib/db";
+import { ensureCotizacionCajaColumns } from "@/lib/data/cotizaciones-cajero";
 import { getProducto } from "@/lib/data/productos";
 import { sqlInt } from "@/lib/data/sql-utils";
 import { rangoPrecioListaTopeBs } from "@/lib/venta-precio-lista-tope-range";
@@ -67,6 +68,7 @@ export type CotizacionLineaInput = {
 
 export type CrearCotizacionInput = {
   usuarioId: number;
+  cajeroDestinoUsuarioId: number;
   clienteNombre: string | null;
   clienteNit: string | null;
   notas: string | null;
@@ -90,6 +92,7 @@ export type CotizacionListadoRow = {
 
 export async function listCotizacionesPorSucursal(sucursalId: number, limit = 50): Promise<CotizacionListadoRow[]> {
   if (!Number.isFinite(sucursalId) || sucursalId < 1) return [];
+  await ensureCotizacionCajaColumns();
   const lim = sqlInt(limit, 200);
   const [rows] = await pool.query<RowDataPacket[]>(
     `SELECT c.id, c.fecha, c.total_bs, c.total_usd, c.cliente_nombre,
@@ -182,12 +185,15 @@ export async function crearCotizacionAdmin(input: CrearCotizacionInput): Promise
     totalUsd = round4(totalUsd + pl.totalLineaUsd);
   }
 
+  await ensureCotizacionCajaColumns();
+
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
 
     const resInsert = await insertCotizacionHeader(conn, {
       usuarioId: input.usuarioId,
+      cajeroDestinoUsuarioId: input.cajeroDestinoUsuarioId,
       clienteNombre: input.clienteNombre?.trim() || null,
       clienteNit: input.clienteNit?.trim() || null,
       notas: input.notas?.trim() || null,
@@ -238,6 +244,7 @@ async function insertCotizacionHeader(
   conn: PoolConnection,
   input: {
     usuarioId: number;
+    cajeroDestinoUsuarioId: number;
     clienteNombre: string | null;
     clienteNit: string | null;
     notas: string | null;
@@ -250,11 +257,12 @@ async function insertCotizacionHeader(
   try {
     const [res] = await conn.execute<ResultSetHeader>(
       `INSERT INTO cotizaciones (
-        usuario_id, cliente_nombre, cliente_nit, notas,
+        usuario_id, cajero_destino_usuario_id, cliente_nombre, cliente_nit, notas,
         tipo_cambio_id, tipo_cambio_snapshot, total_bs, total_usd, estado
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'abierta')`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pendiente')`,
       [
         input.usuarioId,
+        input.cajeroDestinoUsuarioId,
         input.clienteNombre,
         input.clienteNit,
         input.notas,

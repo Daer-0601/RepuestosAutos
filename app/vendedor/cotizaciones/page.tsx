@@ -15,7 +15,7 @@ export default async function VendedorCotizacionesPage() {
       variant="vendedor"
       wide
       title="Cotizaciones"
-      description="Presupuestos con productos activos del catálogo global. Los totales usan el tipo de cambio vigente."
+      description="Armá presupuestos y envialos a caja; el cajero imprime el documento para el cliente."
     >
       <CotizacionesPanel />
     </PanelSection>

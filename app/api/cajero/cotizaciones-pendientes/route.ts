@@ -1,9 +1,9 @@
 import { getCajeroStaffContextOrNull } from "@/lib/auth/staff-panel-context";
-import { parseIsoDateOnly } from "@/lib/fecha-bolivia";
 import {
-  getVentaPendienteCobroDetalle,
-  listVentasPendientesCobroSucursal,
-} from "@/lib/data/ventas-cobro-cajero";
+  getCotizacionPendienteImpresionDetalle,
+  listCotizacionesPendientesImpresionSucursal,
+} from "@/lib/data/cotizaciones-cajero";
+import { parseIsoDateOnly } from "@/lib/fecha-bolivia";
 import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
@@ -15,13 +15,13 @@ export async function GET(request: Request) {
   }
 
   const { searchParams } = new URL(request.url);
-  const ventaIdRaw = searchParams.get("ventaId");
-  const ventaId = ventaIdRaw ? Number(ventaIdRaw) : NaN;
+  const cotizacionIdRaw = searchParams.get("cotizacionId");
+  const cotizacionId = cotizacionIdRaw ? Number(cotizacionIdRaw) : NaN;
 
-  if (Number.isFinite(ventaId) && ventaId > 0) {
-    const detalle = await getVentaPendienteCobroDetalle(Math.trunc(ventaId), ctx.sucursalId);
+  if (Number.isFinite(cotizacionId) && cotizacionId > 0) {
+    const detalle = await getCotizacionPendienteImpresionDetalle(Math.trunc(cotizacionId), ctx.sucursalId);
     if (!detalle) {
-      return NextResponse.json({ error: "Venta no encontrada o ya cobrada." }, { status: 404 });
+      return NextResponse.json({ error: "Cotización no encontrada o ya impresa." }, { status: 404 });
     }
     return NextResponse.json({ detalle }, { headers: { "Cache-Control": "no-store" } });
   }
@@ -32,7 +32,7 @@ export async function GET(request: Request) {
   const fechaDesde = desdeParam ? parseIsoDateOnly(desdeParam) : null;
   const fechaHasta = hastaParam ? parseIsoDateOnly(hastaParam) : fechaDesde;
 
-  const rows = await listVentasPendientesCobroSucursal(
+  const rows = await listCotizacionesPendientesImpresionSucursal(
     ctx.sucursalId,
     filtrarPorDia && fechaDesde
       ? { fechaDesde, fechaHasta: fechaHasta ?? fechaDesde }

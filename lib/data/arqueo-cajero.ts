@@ -72,12 +72,13 @@ export type SalidasDiariasArqueoLinea = {
   fecha: string;
   ventaId: number;
   numeroDocumento: string | null;
-  codigoRepuesto: string;
+  /** Valor de `productos.qr_payload`. */
+  codigo: string;
+  codigoPieza: string;
   medida: string;
   descripcion: string;
   cantidad: number;
   totalLineaBs: number;
-  totalLineaUsd: number;
 };
 
 export async function getVendedorActivoEnSucursal(
@@ -124,8 +125,8 @@ export async function listSalidasDiariasArqueoPorVendedor(
             v.numero_documento AS numero_documento,
             d.cantidad AS cantidad,
             d.total_linea_bs AS total_linea_bs,
-            d.total_linea_usd AS total_linea_usd,
-            COALESCE(NULLIF(TRIM(p.codigo_pieza), ''), NULLIF(TRIM(p.codigo), ''), '—') AS codigo_repuesto,
+            COALESCE(NULLIF(TRIM(p.qr_payload), ''), '—') AS codigo,
+            COALESCE(NULLIF(TRIM(p.codigo_pieza), ''), '—') AS codigo_pieza,
             COALESCE(NULLIF(TRIM(p.medida), ''), '—') AS medida,
             COALESCE(NULLIF(TRIM(p.nombre), ''), '—') AS descripcion
      FROM venta_detalle d
@@ -152,11 +153,11 @@ export async function listSalidasDiariasArqueoPorVendedor(
       r.numero_documento != null && String(r.numero_documento).trim() !== ""
         ? String(r.numero_documento).trim()
         : null,
-    codigoRepuesto: String(r.codigo_repuesto ?? "—"),
+    codigo: String(r.codigo ?? "—"),
+    codigoPieza: String(r.codigo_pieza ?? "—"),
     medida: String(r.medida ?? "—"),
     descripcion: String(r.descripcion ?? "—"),
     cantidad: Number(r.cantidad ?? 0),
     totalLineaBs: Number(r.total_linea_bs ?? 0),
-    totalLineaUsd: Number(r.total_linea_usd ?? 0),
   }));
 }

@@ -1,6 +1,5 @@
 "use client";
 
-import { VentasHistorialFiltroFechas } from "@/app/vendedor/ventas/_components/ventas-historial-filtro-fechas";
 import { formatDateTimeMysqlBolivia, formatoMostrarFechaHoraBo } from "@/lib/fecha-bolivia";
 import { CheckCircle2, Loader2, RefreshCw, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -12,6 +11,7 @@ type VentaPendiente = {
   clienteNombre: string | null;
   clienteNit: string | null;
   vendedorNombre: string;
+  cajeroAsignadoNombre: string | null;
   cantidadItems: number;
 };
 
@@ -31,10 +31,6 @@ type VentaDetalle = {
     totalLineaBs: number;
   }[];
 };
-
-function hoyIso(): string {
-  return formatDateTimeMysqlBolivia(new Date()).slice(0, 10);
-}
 
 function labelPago(tipo: "efectivo" | "qr" | "tarjeta"): string {
   if (tipo === "efectivo") return "Efectivo";
@@ -166,18 +162,17 @@ function buildNotaVentaHtml(input: {
 }
 
 export function CobrosVendedorPanel({
-  fechaDesde,
-  fechaHasta,
   sucursalNombre,
   cajeroUsername,
 }: {
-  fechaDesde: string;
-  fechaHasta: string;
   sucursalNombre: string;
   cajeroUsername: string;
 }) {
+  const [filtrarPorDia, setFiltrarPorDia] = useState(false);
+  const [fechaDia, setFechaDia] = useState(() => formatDateTimeMysqlBolivia(new Date()).slice(0, 10));
   const [rows, setRows] = useState<VentaPendiente[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [detalleId, setDetalleId] = useState<number | null>(null);
   const [detalle, setDetalle] = useState<VentaDetalle | null>(null);
@@ -186,31 +181,69 @@ export function CobrosVendedorPanel({
   const [cobrando, setCobrando] = useState(false);
   const [msg, setMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
 
-  const cargarLista = useCallback(async () => {
-    setLoading(true);
+  const cargarLista = useCallback(async (opts?: { silent?: boolean }) => {
+    const silent = opts?.silent === true;
+    if (silent) {
+      setRefreshing(true);
+    } else {
+      setLoading(true);
+    }
     setError(null);
     try {
-      const res = await fetch(
-        `/api/cajero/ventas-pendientes?desde=${encodeURIComponent(fechaDesde)}&hasta=${encodeURIComponent(fechaHasta)}`,
-        { cache: "no-store" }
-      );
+      const q = new URLSearchParams();
+      if (filtrarPorDia) {
+        q.set("filtrar", "1");
+        q.set("desde", fechaDia);
+        q.set("hasta", fechaDia);
+      }
+      const res = await fetch(`/api/cajero/ventas-pendientes?${q.toString()}`, { cache: "no-store" });
       const data = (await res.json()) as { rows?: VentaPendiente[]; error?: string };
       if (!res.ok) {
         setError(data.error ?? "No se pudo cargar la lista.");
-        setRows([]);
+        if (!silent) setRows([]);
         return;
       }
       setRows(Array.isArray(data.rows) ? data.rows : []);
     } catch {
       setError("Error de red.");
-      setRows([]);
+      if (!silent) setRows([]);
     } finally {
-      setLoading(false);
+      if (silent) {
+        setRefreshing(false);
+      } else {
+        setLoading(false);
+      }
     }
-  }, [fechaDesde, fechaHasta]);
+  }, [filtrarPorDia, fechaDia]);
 
   useEffect(() => {
     void cargarLista();
+  }, [cargarLista]);
+
+  /** Actualización automática para ver envíos del vendedor sin recargar la página. */
+  useEffect(() => {
+    if (detalleId != null) return;
+    const pollMs = 3000;
+    const id = window.setInterval(() => {
+      if (document.visibilityState === "visible") {
+        void cargarLista({ silent: true });
+      }
+    }, pollMs);
+    return () => window.clearInterval(id);
+  }, [cargarLista, detalleId]);
+
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === "visible") {
+        void cargarLista({ silent: true });
+      }
+    };
+    window.addEventListener("focus", onVisible);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.removeEventListener("focus", onVisible);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, [cargarLista]);
 
   const abrirDetalle = useCallback(async (ventaId: number) => {
@@ -280,23 +313,42 @@ export function CobrosVendedorPanel({
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-        <VentasHistorialFiltroFechas
-          defaultDesde={fechaDesde}
-          defaultHasta={fechaHasta}
-          hayParamsFiltro
-          formAction="/cajero/cobros"
-          clearHref={`/cajero/cobros?desde=${hoyIso()}&hasta=${hoyIso()}`}
-          accent="cajero"
-          fieldIdPrefix="cobros"
-        />
+      <div className="flex flex-col gap-4 lg:flex-row lg:flex-wrap lg:items-end lg:justify-between">
+        <div className="flex flex-col gap-3 rounded-xl border border-white/10 bg-slate-950/40 p-4 sm:flex-row sm:flex-wrap sm:items-end">
+          <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={filtrarPorDia}
+              onChange={(e) => setFiltrarPorDia(e.target.checked)}
+              className="rounded border-white/20 bg-slate-900 text-emerald-500"
+            />
+            Solo ventas de un día
+          </label>
+          {filtrarPorDia ? (
+            <div>
+              <label htmlFor="cobros-fecha-dia" className="block text-[10px] font-semibold uppercase text-slate-500">
+                Fecha
+              </label>
+              <input
+                id="cobros-fecha-dia"
+                type="date"
+                value={fechaDia}
+                onChange={(e) => setFechaDia(e.target.value)}
+                className="mt-1 rounded-lg border border-white/15 bg-slate-900 px-3 py-2 text-sm text-white"
+              />
+            </div>
+          ) : (
+            <p className="text-xs text-slate-500">Mostrando todas las ventas pendientes de cobro en tu sucursal.</p>
+          )}
+        </div>
         <button
           type="button"
           onClick={() => void cargarLista()}
-          className="inline-flex items-center gap-2 rounded-lg border border-white/15 px-4 py-2 text-sm text-slate-300 hover:bg-white/5"
+          disabled={loading || refreshing}
+          className="inline-flex items-center gap-2 rounded-lg border border-white/15 px-4 py-2 text-sm text-slate-300 hover:bg-white/5 disabled:opacity-60"
         >
-          <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-          Actualizar
+          <RefreshCw className={`h-4 w-4 ${loading || refreshing ? "animate-spin" : ""}`} />
+          {refreshing ? "Actualizando…" : "Actualizar"}
         </button>
       </div>
 
@@ -325,14 +377,21 @@ export function CobrosVendedorPanel({
             "Cargando…"
           ) : (
             <>
-              {rows.length} venta{rows.length === 1 ? "" : "s"} pendiente{rows.length === 1 ? "" : "s"} del{" "}
-              <span className="font-mono text-slate-300">{fechaDesde}</span>
-              {fechaHasta !== fechaDesde ? (
+              {refreshing ? (
+                <span className="mr-2 inline-flex items-center gap-1 text-emerald-400/90">
+                  <RefreshCw className="h-3 w-3 animate-spin" aria-hidden />
+                  Actualizando
+                </span>
+              ) : null}
+              {rows.length} venta{rows.length === 1 ? "" : "s"} pendiente{rows.length === 1 ? "" : "s"}
+              {filtrarPorDia ? (
                 <>
                   {" "}
-                  al <span className="font-mono text-slate-300">{fechaHasta}</span>
+                  del <span className="font-mono text-slate-300">{fechaDia}</span>
                 </>
-              ) : null}
+              ) : (
+                " en tu sucursal"
+              )}
               {rows.length > 0 ? (
                 <span className="ml-2 font-mono text-emerald-200/90">· {totalPendiente.toFixed(2)} Bs</span>
               ) : null}
@@ -345,13 +404,18 @@ export function CobrosVendedorPanel({
             <span className="text-sm">Cargando ventas…</span>
           </div>
         ) : rows.length === 0 ? (
-          <p className="px-4 py-8 text-sm text-slate-500">No hay ventas pendientes de cobro para este día.</p>
+          <p className="px-4 py-8 text-sm text-slate-500">
+            {filtrarPorDia
+              ? "No hay ventas pendientes de cobro para este día."
+              : "No hay ventas pendientes de cobro en tu sucursal."}
+          </p>
         ) : (
           <table className="w-full min-w-[640px] text-left text-sm">
             <thead className="border-b border-white/10 bg-black/25 text-xs uppercase tracking-wide text-slate-500">
               <tr>
                 <th className="px-4 py-3 font-medium">Hora</th>
                 <th className="px-4 py-3 font-medium">Vendedor</th>
+                <th className="px-4 py-3 font-medium">Cajero</th>
                 <th className="px-4 py-3 font-medium">Cliente</th>
                 <th className="px-4 py-3 font-medium text-right">Ítems</th>
                 <th className="px-4 py-3 font-medium text-right">Total Bs</th>
@@ -365,6 +429,7 @@ export function CobrosVendedorPanel({
                     {new Date(r.fecha.replace(" ", "T") + "-04:00").toLocaleString("es-BO", formatoMostrarFechaHoraBo)}
                   </td>
                   <td className="px-4 py-3">{r.vendedorNombre}</td>
+                  <td className="px-4 py-3 text-slate-400">{r.cajeroAsignadoNombre ?? "—"}</td>
                   <td className="px-4 py-3 text-slate-400">
                     {r.clienteNombre ?? "—"}
                     {r.clienteNit ? (

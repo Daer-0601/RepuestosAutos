@@ -36,10 +36,8 @@ export async function GET(request: Request) {
 
   const lineas = await listSalidasDiariasArqueoPorVendedor(ctx.sucursalId, usuarioId, desde, hasta);
   let totalBs = 0;
-  let totalUsd = 0;
   for (const ln of lineas) {
     totalBs = Math.round((totalBs + ln.totalLineaBs) * 100) / 100;
-    totalUsd = Math.round((totalUsd + ln.totalLineaUsd) * 1e4) / 1e4;
   }
 
   return NextResponse.json({
@@ -48,6 +46,6 @@ export async function GET(request: Request) {
     fechaDesde: desde,
     fechaHasta: hasta,
     lineas,
-    totales: { totalBs, totalUsd },
+    totales: { totalBs },
   });
 }
