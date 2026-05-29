@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Calculator, Wallet } from "lucide-react";
+import { ArrowDownUp, Calculator, Receipt, Wallet } from "lucide-react";
 import Link from "next/link";
 
 export const metadata: Metadata = {
@@ -7,6 +7,20 @@ export const metadata: Metadata = {
 };
 
 const cards = [
+  {
+    href: "/cajero/cobros",
+    title: "Cobros vendedores",
+    desc: "Ventas enviadas por vendedores: revisá el detalle y registrá el cobro.",
+    icon: Receipt,
+    ring: "from-emerald-500/20 to-teal-900/10 ring-emerald-500/30",
+  },
+  {
+    href: "/cajero/reportes/ingresos-egresos",
+    title: "Ingresos / egresos",
+    desc: "Registrá gastos e ingresos del día e imprimí el reporte de caja con venta total.",
+    icon: ArrowDownUp,
+    ring: "from-violet-500/15 to-emerald-900/10 ring-violet-500/25",
+  },
   {
     href: "/cajero/reportes/arqueo-vendedores",
     title: "Arqueo vendedores",

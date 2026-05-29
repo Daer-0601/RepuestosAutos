@@ -6,10 +6,12 @@ import { ShoppingCart } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 const COL_MIN = 40;
+/** Columnas fijas antes de sucursales: Img/QR … Precio Tope */
+const FIXED_COLS = 9;
 
-/** Anchos iniciales: 7 fijas + N sucursales + Total + Acción */
+/** Anchos iniciales: 9 fijas + N sucursales + Total + Acción */
 function defaultColWidths(numSucursales: number): number[] {
-  const base = [88, 88, 88, 72, 220, 80, 72];
+  const base = [88, 88, 72, 220, 80, 80, 88, 88, 72];
   const porSuc = 88;
   const tail = [64, 104];
   return [...base, ...Array(Math.max(0, numSucursales)).fill(porSuc), ...tail];
@@ -52,7 +54,10 @@ export function VentaCatalogoTabla({
   onAgregar: (row: VentaCatalogoApiRow) => void;
 }) {
   const nSuc = sucursales.length;
-  const nCols = 7 + nSuc + 2;
+  const nCols = FIXED_COLS + nSuc + 2;
+  const sucStart = FIXED_COLS;
+  const totalCol = FIXED_COLS + nSuc;
+  const accionCol = FIXED_COLS + nSuc + 1;
 
   const [colWidths, setColWidths] = useState<number[]>(() => defaultColWidths(nSuc));
 
@@ -138,20 +143,22 @@ export function VentaCatalogoTabla({
     (i: number): string => {
       if (i === 0) return "Img / QR";
       if (i === 1) return "Código";
-      if (i === 2) return "Cód. pieza";
-      if (i === 3) return "Medida";
-      if (i === 4) return "Nombre";
-      if (i === 5) return "P. lista Bs";
-      if (i === 6) return "P. tope";
-      if (i >= 7 && i < 7 + nSuc) {
-        const s = sucursales[i - 7];
-        return s ? s.nombre.slice(0, 24) : `Sucursal ${i - 6}`;
+      if (i === 2) return "Medida";
+      if (i === 3) return "Nombre";
+      if (i === 4) return "Marca";
+      if (i === 5) return "Procedencia";
+      if (i === 6) return "Unidad";
+      if (i === 7) return "Precio Lista";
+      if (i === 8) return "Precio Tope";
+      if (i >= sucStart && i < sucStart + nSuc) {
+        const s = sucursales[i - sucStart];
+        return s ? s.nombre.slice(0, 24) : `Sucursal ${i - sucStart + 1}`;
       }
-      if (i === 7 + nSuc) return "Total";
-      if (i === 7 + nSuc + 1) return "Acción";
+      if (i === totalCol) return "Total";
+      if (i === accionCol) return "Acción";
       return `col-${i}`;
     },
-    [nSuc, sucursales]
+    [accionCol, nSuc, sucStart, sucursales, totalCol]
   );
 
   return (
@@ -176,27 +183,35 @@ export function VentaCatalogoTabla({
               {resizeHandle(1, "Código")}
             </th>
             <th className={`${cellPad} relative select-none`}>
-              Cód. pieza
-              {resizeHandle(2, "Cód. pieza")}
-            </th>
-            <th className={`${cellPad} relative select-none`}>
               Medida
-              {resizeHandle(3, "Medida")}
+              {resizeHandle(2, "Medida")}
             </th>
             <th className={`${cellPad} relative select-none`}>
               Nombre
-              {resizeHandle(4, "Nombre")}
+              {resizeHandle(3, "Nombre")}
+            </th>
+            <th className={`${cellPad} relative select-none`}>
+              Marca
+              {resizeHandle(4, "Marca")}
+            </th>
+            <th className={`${cellPad} relative select-none`}>
+              Procedencia
+              {resizeHandle(5, "Procedencia")}
+            </th>
+            <th className={`${cellPad} relative select-none`}>
+              Unidad
+              {resizeHandle(6, "Unidad")}
             </th>
             <th className={`${cellPad} relative select-none text-right`}>
-              P. lista Bs
-              {resizeHandle(5, "P. lista Bs")}
+              Precio Lista
+              {resizeHandle(7, "Precio Lista")}
             </th>
             <th className={`${cellPad} relative select-none text-right`}>
-              P. tope
-              {resizeHandle(6, "P. tope")}
+              Precio Tope
+              {resizeHandle(8, "Precio Tope")}
             </th>
             {sucursales.map((s, si) => {
-              const i = 7 + si;
+              const i = sucStart + si;
               return (
                 <th
                   key={s.id}
@@ -212,11 +227,11 @@ export function VentaCatalogoTabla({
             })}
             <th className={`${cellPad} relative select-none text-center`}>
               Total
-              {resizeHandle(7 + nSuc, "Total")}
+              {resizeHandle(totalCol, "Total")}
             </th>
             <th className={`${cellPad} relative select-none text-right`}>
               Acción
-              {resizeHandle(7 + nSuc + 1, "Acción")}
+              {resizeHandle(accionCol, "Acción")}
             </th>
           </tr>
         </thead>
@@ -275,30 +290,38 @@ export function VentaCatalogoTabla({
                     {r.codigo}
                     {resizeHandle(1, labelAt(1))}
                   </td>
-                  <td className={`${cellPad} relative truncate font-mono text-slate-400`}>
-                    {r.codigo_pieza ?? "—"}
-                    {resizeHandle(2, labelAt(2))}
-                  </td>
                   <td className={`${cellPad} relative truncate font-mono text-[11px] text-slate-400`} title={r.medida ?? ""}>
                     {r.medida ?? "—"}
-                    {resizeHandle(3, labelAt(3))}
+                    {resizeHandle(2, labelAt(2))}
                   </td>
                   <td className={`${cellPad} relative`}>
                     <span className="line-clamp-2 font-medium text-slate-100" title={r.nombre}>
                       {r.nombre}
                     </span>
+                    {resizeHandle(3, labelAt(3))}
+                  </td>
+                  <td className={`${cellPad} relative truncate text-slate-300`} title={r.marca_auto ?? ""}>
+                    {r.marca_auto ?? "—"}
                     {resizeHandle(4, labelAt(4))}
+                  </td>
+                  <td className={`${cellPad} relative truncate text-slate-400`} title={r.procedencia ?? ""}>
+                    {r.procedencia ?? "—"}
+                    {resizeHandle(5, labelAt(5))}
+                  </td>
+                  <td className={`${cellPad} relative truncate text-slate-400`} title={r.unidad ?? ""}>
+                    {r.unidad ?? "—"}
+                    {resizeHandle(6, labelAt(6))}
                   </td>
                   <td className={`${cellPad} relative text-right font-mono text-slate-200`}>
                     {fmtMoneda(r.precio_venta_lista_bs, 2)}
-                    {resizeHandle(5, labelAt(5))}
+                    {resizeHandle(7, labelAt(7))}
                   </td>
                   <td className={`${cellPad} relative text-right font-mono text-amber-100/80`}>
                     {fmtMoneda(r.punto_tope, 2)}
-                    {resizeHandle(6, labelAt(6))}
+                    {resizeHandle(8, labelAt(8))}
                   </td>
                   {sucursales.map((s, si) => {
-                    const i = 7 + si;
+                    const i = sucStart + si;
                     const q = r.stocksPorSucursal.find((x) => x.sucursalId === s.id)?.stock ?? 0;
                     const esMi = s.id === miSucursalId;
                     return (
@@ -315,7 +338,7 @@ export function VentaCatalogoTabla({
                   })}
                   <td className={`${cellPad} relative text-center font-mono font-semibold text-slate-200`}>
                     {r.stock_total}
-                    {resizeHandle(7 + nSuc, labelAt(7 + nSuc))}
+                    {resizeHandle(totalCol, labelAt(totalCol))}
                   </td>
                   <td className={`${cellPad} relative text-right`}>
                     <button
@@ -332,7 +355,7 @@ export function VentaCatalogoTabla({
                       <ShoppingCart className="h-3.5 w-3.5" strokeWidth={2} />
                       Agregar
                     </button>
-                    {resizeHandle(7 + nSuc + 1, labelAt(7 + nSuc + 1))}
+                    {resizeHandle(accionCol, labelAt(accionCol))}
                   </td>
                 </tr>
               );

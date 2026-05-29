@@ -2,10 +2,12 @@
 
 import { logout } from "@/lib/auth/logout";
 import {
+  ArrowDownUp,
   Calculator,
   LayoutDashboard,
   LogOut,
   Menu,
+  Receipt,
   Wallet,
   X,
 } from "lucide-react";
@@ -15,6 +17,8 @@ import { useState } from "react";
 
 const nav = [
   { href: "/cajero", label: "Inicio", icon: LayoutDashboard, exact: true },
+  { href: "/cajero/cobros", label: "Cobros vendedores", icon: Receipt },
+  { href: "/cajero/reportes/ingresos-egresos", label: "Ingresos / egresos", icon: ArrowDownUp },
   { href: "/cajero/reportes/arqueo-vendedores", label: "Arqueo vendedores", icon: Calculator },
   { href: "/cajero/reportes/creditos", label: "Créditos", icon: Wallet },
 ] as const;

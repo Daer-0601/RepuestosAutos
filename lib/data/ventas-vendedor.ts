@@ -14,7 +14,8 @@ import {
 import { getProducto, listProductoImagenes } from "@/lib/data/productos";
 import { getSucursal, listSucursales } from "@/lib/data/sucursales";
 import { sqlInt } from "@/lib/data/sql-utils";
-import { MYSQL_SESSION_OFFSET, formatDateTimeMysqlBolivia } from "@/lib/fecha-bolivia";
+import { MYSQL_SESSION_OFFSET, formatDateTimeMysqlBolivia, mysqlValueToIsoDateOnly } from "@/lib/fecha-bolivia";
+import { assertCajeroDestinoValido, ensureVentasCobroCajaColumns } from "@/lib/data/ventas-cobro-cajero";
 import { validarPrecioVentaBs } from "@/lib/venta-precio-lista-tope-range";
 import type {
   ModoCatalogoVenta,
@@ -122,7 +123,10 @@ export async function listProductosParaVentaCatalogoJson(input: {
     nombre: r.nombre,
     codigo_pieza: r.codigo_pieza,
     medida: r.medida,
+    unidad: r.unidad,
     descripcion: r.descripcion,
+    marca_auto: r.marca_auto,
+    procedencia: r.procedencia,
     qr_payload: r.qr_payload ?? "",
     imagenes_urls: Array.isArray(r.imagenes_urls) ? r.imagenes_urls : [],
     precio_venta_lista_bs: r.precio_venta_lista_bs,
@@ -151,7 +155,7 @@ export async function getProductoVentaCompletoPorCodigo(
   if (!frag) return null;
 
   const [prows] = await pool.execute<RowDataPacket[]>(
-    `SELECT p.id, p.codigo, p.nombre, p.codigo_pieza, p.medida, p.descripcion, p.qr_payload,
+    `SELECT p.id, p.codigo, p.nombre, p.codigo_pieza, p.medida, p.unidad, p.descripcion, p.marca_auto, p.procedencia, p.qr_payload,
             p.precio_venta_lista_bs, p.precio_venta_lista_usd, p.punto_tope
      FROM productos p
      WHERE p.estado = 'activo' AND (${frag.sql})`,
@@ -188,7 +192,10 @@ export async function getProductoVentaCompletoPorCodigo(
     nombre: String(pr.nombre ?? ""),
     codigo_pieza: pr.codigo_pieza != null && String(pr.codigo_pieza).trim() !== "" ? String(pr.codigo_pieza) : null,
     medida: pr.medida != null && String(pr.medida).trim() !== "" ? String(pr.medida) : null,
+    unidad: pr.unidad != null && String(pr.unidad).trim() !== "" ? String(pr.unidad) : null,
     descripcion: pr.descripcion != null && String(pr.descripcion).trim() !== "" ? String(pr.descripcion) : null,
+    marca_auto: pr.marca_auto != null && String(pr.marca_auto).trim() !== "" ? String(pr.marca_auto) : null,
+    procedencia: pr.procedencia != null && String(pr.procedencia).trim() !== "" ? String(pr.procedencia) : null,
     qr_payload: String(pr.qr_payload ?? ""),
     imagenes_urls,
     precio_venta_lista_bs: strNum(pr.precio_venta_lista_bs as string | null),
@@ -277,7 +284,7 @@ export async function listVentasPorSucursal(
   }
   const [rows] = await pool.query<RowDataPacket[]>(
     `SELECT v.id, v.fecha, v.tipo_pago, v.total_bs, v.total_usd, v.estado_cobro,
-            c.nombre AS cliente_nombre
+            COALESCE(NULLIF(TRIM(c.nombre), ''), NULLIF(TRIM(v.cliente_nombre_libre), '')) AS cliente_nombre
      FROM ventas v
      LEFT JOIN clientes c ON c.id = v.cliente_id
      WHERE v.sucursal_id = ? AND v.estado = 'confirmada'
@@ -287,6 +294,45 @@ export async function listVentasPorSucursal(
     params
   );
   return rows as VentaListadoRow[];
+}
+
+export type VentaTotalesPorDiaRow = {
+  fecha: string;
+  cantidad: number;
+  totalBs: number;
+  totalUsd: number;
+};
+
+/** Totales agrupados por día (DATE de `ventas.fecha`) en el rango inclusive. */
+export async function listTotalesVentasPorDiaPorSucursal(
+  sucursalId: number,
+  fechaDesde: string,
+  fechaHasta: string
+): Promise<VentaTotalesPorDiaRow[]> {
+  if (!Number.isFinite(sucursalId) || sucursalId < 1) return [];
+  const d1 = fechaDesde.trim();
+  const d2 = fechaHasta.trim();
+  if (!d1 || !d2) return [];
+
+  const [rows] = await pool.query<RowDataPacket[]>(
+    `SELECT DATE(v.fecha) AS dia,
+            COUNT(*) AS n,
+            COALESCE(SUM(v.total_bs), 0) AS sum_bs,
+            COALESCE(SUM(v.total_usd), 0) AS sum_usd
+     FROM ventas v
+     WHERE v.sucursal_id = ? AND v.estado = 'confirmada'
+       AND DATE(v.fecha) >= ? AND DATE(v.fecha) <= ?
+     GROUP BY DATE(v.fecha)
+     ORDER BY dia DESC`,
+    [sucursalId, d1, d2]
+  );
+
+  return (rows as RowDataPacket[]).map((r) => ({
+    fecha: mysqlValueToIsoDateOnly(r.dia) ?? "",
+    cantidad: Number(r.n),
+    totalBs: Number(r.sum_bs),
+    totalUsd: Number(r.sum_usd),
+  })).filter((row) => row.fecha !== "");
 }
 
 /** Sumas de todas las ventas confirmadas en el rango (sin límite de filas). */
@@ -331,7 +377,8 @@ export type RegistrarVentaVendedorInput = {
   usuarioId: number;
   sucursalId: number;
   clienteId: number | null;
-  tipoPago: TipoPagoVenta;
+  /** Obligatorio si `enviarACaja` es false (cobro inmediato legacy). */
+  tipoPago?: TipoPagoVenta | null;
   tipoCambioId: number;
   tipoCambioSnapshot: number;
   numeroDocumento: string | null;
@@ -343,6 +390,9 @@ export type RegistrarVentaVendedorInput = {
   lineas: LineaVentaInput[];
   /** Solo aplica si tipoPago = credito (YYYY-MM-DD o null) */
   creditoFechaLimite: string | null;
+  /** Envía la venta a caja; el cajero registra forma de pago y cobro. */
+  enviarACaja?: boolean;
+  cajeroDestinoUsuarioId?: number | null;
 };
 
 export type RegistrarVentaVendedorResult =
@@ -485,6 +535,18 @@ export async function registrarVentaVendedor(input: RegistrarVentaVendedorInput)
     return { ok: false, message: "Agregá al menos un producto." };
   }
 
+  const enviarACaja = input.enviarACaja === true;
+  if (enviarACaja) {
+    const cajeroId = input.cajeroDestinoUsuarioId;
+    if (cajeroId == null || !Number.isFinite(cajeroId) || cajeroId < 1) {
+      return { ok: false, message: "Elegí el cajero que cobrará esta venta." };
+    }
+    const chkCajero = await assertCajeroDestinoValido(input.sucursalId, Math.trunc(cajeroId));
+    if (!chkCajero.ok) return chkCajero;
+  } else if (!input.tipoPago) {
+    return { ok: false, message: "Tipo de pago inválido." };
+  }
+
   if (input.tipoPago === "credito") {
     if (input.clienteId == null || input.clienteId < 1) {
       return { ok: false, message: "Las ventas a crédito requieren cliente." };
@@ -497,6 +559,7 @@ export async function registrarVentaVendedor(input: RegistrarVentaVendedorInput)
 
   const conn = await pool.getConnection();
   try {
+    await ensureVentasCobroCajaColumns();
     await conn.query(`SET time_zone = '${MYSQL_SESSION_OFFSET}'`);
     await conn.beginTransaction();
 
@@ -519,17 +582,22 @@ export async function registrarVentaVendedor(input: RegistrarVentaVendedorInput)
       }
     }
 
-    const estadoCobro = input.tipoPago === "credito" ? "pendiente" : "cobrado";
+    const estadoCobro = enviarACaja ? "pendiente" : input.tipoPago === "credito" ? "pendiente" : "cobrado";
+    const tipoPagoInsert = enviarACaja ? "efectivo" : input.tipoPago!;
+    const cajeroDestinoId =
+      enviarACaja && input.cajeroDestinoUsuarioId != null
+        ? Math.trunc(input.cajeroDestinoUsuarioId)
+        : null;
 
     /* Columnas en `ventas`: ver `db/schema_ventas.sql` o migración `db/migrations/001_ventas_tipo_nota_cliente_libre.sql`. */
     const [ventaRes] = await conn.execute<ResultSetHeader>(
       `INSERT INTO ventas (
         numero_documento, tipo_nota, cliente_id, cliente_nombre_libre, cliente_nit,
-        usuario_id, sucursal_id, tipo_pago,
+        usuario_id, cajero_destino_usuario_id, sucursal_id, tipo_pago,
         tipo_cambio_id, tipo_cambio_snapshot,
         subtotal_bs, subtotal_usd, total_bs, total_usd,
         estado, estado_cobro, fecha
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'confirmada', ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'confirmada', ?, ?)`,
       [
         input.numeroDocumento?.trim() || null,
         input.tipoNota?.trim() || null,
@@ -537,8 +605,9 @@ export async function registrarVentaVendedor(input: RegistrarVentaVendedorInput)
         input.clienteNombreLibre?.trim() || null,
         input.clienteNit?.trim() || null,
         input.usuarioId,
+        cajeroDestinoId,
         input.sucursalId,
-        input.tipoPago,
+        tipoPagoInsert,
         input.tipoCambioId,
         tc,
         subtotalBs,
@@ -615,7 +684,7 @@ export async function registrarVentaVendedor(input: RegistrarVentaVendedorInput)
       );
     }
 
-    if (input.tipoPago === "credito") {
+    if (!enviarACaja && input.tipoPago === "credito") {
       let fechaLim: string | null = null;
       if (input.creditoFechaLimite?.trim()) {
         const d = input.creditoFechaLimite.trim();

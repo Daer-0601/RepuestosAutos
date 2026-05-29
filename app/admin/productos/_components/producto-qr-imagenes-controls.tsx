@@ -1,6 +1,6 @@
 "use client";
 
-import { Download, Images, Printer, QrCode, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Download, Images, Printer, QrCode, X } from "lucide-react";
 import QRCode from "qrcode";
 import { useEffect, useId, useState } from "react";
 import { createPortal } from "react-dom";
@@ -417,6 +417,7 @@ export function ProductoQrImagenesControls({
     descripcion: string | null;
   } | null>(null);
   const [imgModal, setImgModal] = useState<{ codigo: string; urls: string[] } | null>(null);
+  const [imgIndex, setImgIndex] = useState(0);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [qrGenError, setQrGenError] = useState(false);
   const [mounted, setMounted] = useState(false);
@@ -465,6 +466,15 @@ export function ProductoQrImagenesControls({
       if (e.key === "Escape") {
         setQrModal(null);
         setImgModal(null);
+        return;
+      }
+      if (!imgModal || imgModal.urls.length <= 1) return;
+      if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        setImgIndex((i) => (i - 1 + imgModal.urls.length) % imgModal.urls.length);
+      } else if (e.key === "ArrowRight") {
+        e.preventDefault();
+        setImgIndex((i) => (i + 1) % imgModal.urls.length);
       }
     };
     window.addEventListener("keydown", onKey);
@@ -498,7 +508,18 @@ export function ProductoQrImagenesControls({
 
   const openImg = (e: React.MouseEvent) => {
     onOpenInteraction?.(e);
+    setImgIndex(0);
     setImgModal({ codigo, urls: imagenesUrls });
+  };
+
+  const imgPrev = () => {
+    if (!imgModal || imgModal.urls.length <= 1) return;
+    setImgIndex((i) => (i - 1 + imgModal.urls.length) % imgModal.urls.length);
+  };
+
+  const imgNext = () => {
+    if (!imgModal || imgModal.urls.length <= 1) return;
+    setImgIndex((i) => (i + 1) % imgModal.urls.length);
   };
 
   const overlayClass =
@@ -595,43 +616,86 @@ export function ProductoQrImagenesControls({
     mounted &&
     imgModal &&
     createPortal(
-      <div className={overlayClass} role="presentation" onClick={() => setImgModal(null)}>
+      <div
+        className="fixed inset-0 z-[200] flex flex-col bg-black/90 backdrop-blur-sm"
+        role="presentation"
+        onClick={() => setImgModal(null)}
+      >
         <div
           role="dialog"
           aria-modal="true"
           aria-labelledby={imgTitleId}
-          className="relative my-auto max-h-[85vh] w-full max-w-3xl overflow-y-auto rounded-2xl border border-white/15 bg-slate-900 p-5 shadow-xl"
+          className="relative flex min-h-0 flex-1 flex-col"
           onClick={(ev) => ev.stopPropagation()}
         >
-          <button
-            type="button"
-            className="absolute right-3 top-3 z-10 rounded-lg p-1 text-slate-400 hover:bg-white/10 hover:text-white"
-            onClick={() => setImgModal(null)}
-            aria-label="Cerrar"
-          >
-            <X className="h-4 w-4" />
-          </button>
-          <h2 id={imgTitleId} className="pr-8 text-sm font-semibold text-white">
-            Imágenes · {imgModal.codigo}
-          </h2>
+          <div className="flex shrink-0 items-center justify-between gap-3 border-b border-white/10 px-4 py-3 sm:px-6">
+            <h2 id={imgTitleId} className="text-sm font-semibold text-white sm:text-base">
+              Imágenes · {imgModal.codigo}
+              {imgModal.urls.length > 1 ? (
+                <span className="ml-2 font-normal text-slate-400">
+                  ({imgIndex + 1} de {imgModal.urls.length})
+                </span>
+              ) : null}
+            </h2>
+            <button
+              type="button"
+              className="rounded-lg p-2 text-slate-400 hover:bg-white/10 hover:text-white"
+              onClick={() => setImgModal(null)}
+              aria-label="Cerrar"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+
           {imgModal.urls.length === 0 ? (
-            <p className="mt-6 text-center text-sm text-slate-500">Este producto no tiene imágenes cargadas.</p>
+            <p className="flex flex-1 items-center justify-center text-sm text-slate-500">
+              Este producto no tiene imágenes cargadas.
+            </p>
           ) : (
-            <div className="mt-4 grid gap-4 sm:grid-cols-2">
-              {imgModal.urls.map((url, i) => (
-                <a
-                  key={`${url}-${i}`}
-                  href={url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="block overflow-hidden rounded-xl border border-white/10 bg-slate-950/60 hover:border-sky-500/30"
+            <div className="relative flex min-h-0 flex-1 items-center justify-center px-2 py-4 sm:px-14">
+              {imgModal.urls.length > 1 ? (
+                <button
+                  type="button"
+                  className="absolute left-1 top-1/2 z-10 -translate-y-1/2 rounded-full border border-white/20 bg-slate-900/90 p-2.5 text-white shadow-lg transition hover:border-sky-500/50 hover:bg-slate-800 sm:left-4 sm:p-3"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    imgPrev();
+                  }}
+                  aria-label="Imagen anterior"
                 >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={url} alt="" className="mx-auto max-h-64 w-full object-contain" />
-                </a>
-              ))}
+                  <ChevronLeft className="h-6 w-6 sm:h-8 sm:w-8" strokeWidth={2} />
+                </button>
+              ) : null}
+
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                key={imgModal.urls[imgIndex]}
+                src={imgModal.urls[imgIndex]}
+                alt={`Imagen ${imgIndex + 1} de ${imgModal.codigo}`}
+                className="max-h-[calc(100dvh-7rem)] max-w-[min(100%,calc(100dvw-5rem))] object-contain"
+              />
+
+              {imgModal.urls.length > 1 ? (
+                <button
+                  type="button"
+                  className="absolute right-1 top-1/2 z-10 -translate-y-1/2 rounded-full border border-white/20 bg-slate-900/90 p-2.5 text-white shadow-lg transition hover:border-sky-500/50 hover:bg-slate-800 sm:right-4 sm:p-3"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    imgNext();
+                  }}
+                  aria-label="Imagen siguiente"
+                >
+                  <ChevronRight className="h-6 w-6 sm:h-8 sm:w-8" strokeWidth={2} />
+                </button>
+              ) : null}
             </div>
           )}
+
+          {imgModal.urls.length > 1 ? (
+            <p className="shrink-0 pb-3 text-center text-xs text-slate-500">
+              Flechas del teclado ← → para cambiar de imagen
+            </p>
+          ) : null}
         </div>
       </div>,
       document.body

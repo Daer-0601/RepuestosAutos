@@ -12,6 +12,9 @@ export type VentaCarritoProducto = {
   descripcionMostrar: string;
   codigoPieza: string | null;
   medida: string | null;
+  unidad: string | null;
+  marcaAuto: string | null;
+  procedencia: string | null;
   stock: number;
   precio_venta_lista_bs: number | null;
   precio_venta_lista_usd: number | null;
@@ -29,18 +32,20 @@ export type VentaCarritoLinea = {
 
 const COL_MIN = 40;
 
-const DEFAULT_COL_WIDTHS = [88, 84, 84, 72, 220, 56, 52, 96, 80, 88, 44];
+const DEFAULT_COL_WIDTHS = [88, 84, 72, 200, 80, 88, 64, 96, 80, 56, 52, 88, 44];
 
 const COL_LABELS = [
   "Img / QR",
   "Código",
-  "Cód. pieza",
   "Medida",
-  "Descripción",
+  "Nombre",
+  "Marca",
+  "Procedencia",
+  "Unidad",
+  "Precio Lista",
+  "Precio Tope",
   "Cant.",
   "Stock",
-  "P. venta Bs",
-  "P. tope",
   "Subtotal",
   "",
 ] as const;
@@ -52,6 +57,7 @@ export function VentaCarritoTabla({
   inpPosClass,
   subtotalLineaBs,
   onCantidadChange,
+  onCantidadBlur,
   onPrecioChange,
   onPrecioBlur,
   onRemove,
@@ -60,6 +66,7 @@ export function VentaCarritoTabla({
   inpPosClass: string;
   subtotalLineaBs: (ln: VentaCarritoLinea) => number | null;
   onCantidadChange: (key: string, value: string) => void;
+  onCantidadBlur?: (key: string) => void;
   onPrecioChange: (key: string, value: string) => void;
   onPrecioBlur?: (key: string) => void;
   onRemove: (key: string) => void;
@@ -156,8 +163,8 @@ export function VentaCarritoTabla({
               <th
                 key={i}
                 className={`${cellPad} relative select-none ${
-                  i >= 5 && i <= 9 ? "text-right" : ""
-                } ${i === 10 ? "text-center" : ""}`}
+                  i >= 7 && i <= 11 ? "text-right" : ""
+                } ${i === 12 ? "text-center" : ""}`}
                 title="Arrastrá el borde derecho de la columna para cambiar el ancho"
               >
                 {label ? label : <span className="text-slate-600">·</span>}
@@ -207,31 +214,26 @@ export function VentaCarritoTabla({
                     {p.codigo}
                     {resizeHandle(1, COL_LABELS[1])}
                   </td>
-                  <td className={`${cellPad} relative truncate font-mono text-slate-400`}>
-                    {p.codigoPieza?.trim() || "—"}
+                  <td className={`${cellPad} relative truncate font-mono text-[11px] text-slate-400`} title={p.medida ?? ""}>
+                    {p.medida?.trim() || "—"}
                     {resizeHandle(2, COL_LABELS[2])}
                   </td>
-                  <td className={`${cellPad} relative truncate font-mono text-slate-400`} title={p.medida ?? ""}>
-                    {p.medida?.trim() || "—"}
+                  <td className={`${cellPad} relative`}>
+                    <span className="line-clamp-3 font-medium text-slate-100" title={p.nombre}>
+                      {p.nombre}
+                    </span>
                     {resizeHandle(3, COL_LABELS[3])}
                   </td>
-                  <td className={`${cellPad} relative`}>
-                    <span className="line-clamp-3 text-slate-300" title={p.descripcionMostrar}>
-                      {p.descripcionMostrar}
-                    </span>
+                  <td className={`${cellPad} relative truncate text-slate-300`} title={p.marcaAuto ?? ""}>
+                    {p.marcaAuto?.trim() || "—"}
                     {resizeHandle(4, COL_LABELS[4])}
                   </td>
-                  <td className={`${cellPad} relative text-right`}>
-                    <input
-                      className={`${inpPosClass} w-full text-right font-mono`}
-                      inputMode="numeric"
-                      value={ln.cantidad}
-                      onChange={(e) => onCantidadChange(ln.key, e.target.value)}
-                    />
+                  <td className={`${cellPad} relative truncate text-slate-400`} title={p.procedencia ?? ""}>
+                    {p.procedencia?.trim() || "—"}
                     {resizeHandle(5, COL_LABELS[5])}
                   </td>
-                  <td className={`${cellPad} relative text-right font-mono text-emerald-200/85`}>
-                    {p.stock}
+                  <td className={`${cellPad} relative truncate text-slate-400`} title={p.unidad ?? ""}>
+                    {p.unidad?.trim() || "—"}
                     {resizeHandle(6, COL_LABELS[6])}
                   </td>
                   <td className={`${cellPad} relative text-right`}>
@@ -256,7 +258,7 @@ export function VentaCarritoTabla({
                       Number.isFinite(p.precio_venta_lista_bs) &&
                       p.precio_venta_lista_bs > 0 ? (
                         <span className="max-w-[10rem] text-right text-[10px] font-mono leading-tight tabular-nums text-slate-500">
-                          precioVenta({p.precio_venta_lista_bs.toFixed(2)} Bs)
+                          lista ({p.precio_venta_lista_bs.toFixed(2)} Bs)
                         </span>
                       ) : null}
                     </div>
@@ -266,9 +268,23 @@ export function VentaCarritoTabla({
                     {p.punto_tope != null ? p.punto_tope.toFixed(2) : "—"}
                     {resizeHandle(8, COL_LABELS[8])}
                   </td>
+                  <td className={`${cellPad} relative text-right`}>
+                    <input
+                      className={`${inpPosClass} w-full text-right font-mono`}
+                      inputMode="numeric"
+                      value={ln.cantidad}
+                      onChange={(e) => onCantidadChange(ln.key, e.target.value)}
+                      onBlur={() => onCantidadBlur?.(ln.key)}
+                    />
+                    {resizeHandle(9, COL_LABELS[9])}
+                  </td>
+                  <td className={`${cellPad} relative text-right font-mono text-emerald-200/85`}>
+                    {p.stock}
+                    {resizeHandle(10, COL_LABELS[10])}
+                  </td>
                   <td className={`${cellPad} relative text-right font-mono text-slate-100`}>
                     {sub != null ? sub.toFixed(2) : "—"}
-                    {resizeHandle(9, COL_LABELS[9])}
+                    {resizeHandle(11, COL_LABELS[11])}
                   </td>
                   <td className={`${cellPad} relative border-r-0 text-center`}>
                     <button
@@ -279,7 +295,7 @@ export function VentaCarritoTabla({
                     >
                       <Trash2 className="h-4 w-4" />
                     </button>
-                    {resizeHandle(10, COL_LABELS[10] || "acción")}
+                    {resizeHandle(12, COL_LABELS[12] || "acción")}
                   </td>
                 </tr>
               );

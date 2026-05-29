@@ -38,10 +38,10 @@ export async function arqueoVentasPorVendedoresSucursal(
             COUNT(v.id) AS cantidad_ventas,
             COALESCE(SUM(v.total_bs), 0) AS total_bs,
             COALESCE(SUM(v.total_usd), 0) AS total_usd,
-            COALESCE(SUM(CASE WHEN v.tipo_pago = 'efectivo' THEN v.total_bs ELSE 0 END), 0) AS bs_efectivo,
-            COALESCE(SUM(CASE WHEN v.tipo_pago = 'qr' THEN v.total_bs ELSE 0 END), 0) AS bs_qr,
-            COALESCE(SUM(CASE WHEN v.tipo_pago = 'tarjeta' THEN v.total_bs ELSE 0 END), 0) AS bs_tarjeta,
-            COALESCE(SUM(CASE WHEN v.tipo_pago = 'credito' THEN v.total_bs ELSE 0 END), 0) AS bs_credito
+            COALESCE(SUM(CASE WHEN v.estado_cobro = 'cobrado' AND v.tipo_pago = 'efectivo' THEN v.total_bs ELSE 0 END), 0) AS bs_efectivo,
+            COALESCE(SUM(CASE WHEN v.estado_cobro = 'cobrado' AND v.tipo_pago = 'qr' THEN v.total_bs ELSE 0 END), 0) AS bs_qr,
+            COALESCE(SUM(CASE WHEN v.estado_cobro = 'cobrado' AND v.tipo_pago = 'tarjeta' THEN v.total_bs ELSE 0 END), 0) AS bs_tarjeta,
+            COALESCE(SUM(CASE WHEN v.estado_cobro = 'cobrado' AND v.tipo_pago = 'credito' THEN v.total_bs ELSE 0 END), 0) AS bs_credito
      FROM usuarios u
      LEFT JOIN ventas v ON v.usuario_id = u.id
        AND v.sucursal_id = ?

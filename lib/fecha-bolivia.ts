@@ -51,3 +51,31 @@ export function parseIsoDateOnly(raw: string | undefined | null): string | null 
   if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== m - 1 || dt.getUTCDate() !== d) return null;
   return s;
 }
+
+/**
+ * Normaliza un valor DATE/DATETIME de mysql2 (`Date` o string) a `YYYY-MM-DD`
+ * en calendario Bolivia (evita `String(date).slice(0,10)` → "Wed May 28").
+ */
+export function mysqlValueToIsoDateOnly(raw: unknown): string | null {
+  if (raw instanceof Date) {
+    if (Number.isNaN(raw.getTime())) return null;
+    return formatDateTimeMysqlBolivia(raw).slice(0, 10);
+  }
+  if (typeof raw === "string") {
+    const head = raw.trim().slice(0, 10);
+    const parsed = parseIsoDateOnly(head);
+    if (parsed) return parsed;
+    const d = new Date(raw);
+    if (!Number.isNaN(d.getTime())) return formatDateTimeMysqlBolivia(d).slice(0, 10);
+  }
+  return null;
+}
+
+/** Muestra una fecha `YYYY-MM-DD` en formato corto Bolivia. */
+export function formatIsoDateOnlyBo(iso: string): string {
+  const p = parseIsoDateOnly(iso);
+  if (!p) return iso;
+  const [y, m, d] = p.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d, 12, 0, 0));
+  return dt.toLocaleDateString("es-BO", formatoMostrarFechaBo);
+}

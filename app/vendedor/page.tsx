@@ -17,7 +17,7 @@ const cards = [
   {
     href: "/vendedor/ventas",
     title: "Historial",
-    desc: "Ventas recientes de tu sucursal.",
+    desc: "Totales por día y detalle de ventas de tu sucursal.",
     icon: ScrollText,
     ring: "from-rose-500/15 to-slate-800/10 ring-rose-500/20",
   },

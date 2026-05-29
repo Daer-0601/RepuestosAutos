@@ -1,19 +1,12 @@
 import { getVendedorStaffContextOrNull } from "@/lib/auth/staff-panel-context";
 import { getUltimoTipoCambio } from "@/lib/data/tipo-cambio";
+import { listCajerosActivosPorSucursal } from "@/lib/data/usuarios";
 import {
   registrarVentaVendedor,
   type LineaVentaInput,
-  type TipoPagoVenta,
 } from "@/lib/data/ventas-vendedor";
 import { revalidatePath } from "next/cache";
 import { NextResponse } from "next/server";
-
-/** Cobro inmediato en puesto de venta; el crédito se registra en otra sección. */
-const TIPOS_PAGO_VENDEDOR: TipoPagoVenta[] = ["efectivo", "qr", "tarjeta"];
-
-function isTipoPagoVendedor(s: string): s is TipoPagoVenta {
-  return (TIPOS_PAGO_VENDEDOR as string[]).includes(s);
-}
 
 function parseLinea(raw: unknown): LineaVentaInput | null {
   if (!raw || typeof raw !== "object") return null;
@@ -56,17 +49,18 @@ export async function POST(request: Request) {
   }
 
   const b = body as Record<string, unknown>;
-  const tipoPagoRaw = typeof b.tipoPago === "string" ? b.tipoPago : "";
-  if (!isTipoPagoVendedor(tipoPagoRaw)) {
-    return NextResponse.json(
-      {
-        error:
-          tipoPagoRaw === "credito"
-            ? "Las ventas a crédito se gestionan en la sección de créditos, no desde el puesto de venta."
-            : "Tipo de pago inválido.",
-      },
-      { status: 400 }
-    );
+
+  const cajeroDestinoRaw = b.cajeroDestinoUsuarioId;
+  const cajeroDestinoUsuarioId =
+    cajeroDestinoRaw === null || cajeroDestinoRaw === undefined || cajeroDestinoRaw === ""
+      ? null
+      : Number(cajeroDestinoRaw);
+  if (
+    cajeroDestinoUsuarioId === null ||
+    !Number.isFinite(cajeroDestinoUsuarioId) ||
+    cajeroDestinoUsuarioId < 1
+  ) {
+    return NextResponse.json({ error: "Elegí el cajero que cobrará esta venta." }, { status: 400 });
   }
 
   const clienteIdRaw = b.clienteId;
@@ -103,9 +97,6 @@ export async function POST(request: Request) {
   const tipoCambioSnapshot =
     Number.isFinite(tcBodyVal) && tcBodyVal > 0 ? tcBodyVal : ultimo.valor_bs_por_usd;
 
-  const creditoFechaLimite =
-    typeof b.creditoFechaLimite === "string" ? b.creditoFechaLimite.trim() || null : null;
-
   const clienteNombreLibreRaw = typeof b.clienteNombreLibre === "string" ? b.clienteNombreLibre.trim() : "";
   const clienteNitRaw = typeof b.clienteNit === "string" ? b.clienteNit.trim() : "";
   const clienteNombreLibre = clienteNombreLibreRaw ? clienteNombreLibreRaw.slice(0, 255) : null;
@@ -115,7 +106,6 @@ export async function POST(request: Request) {
     usuarioId: ctx.userId,
     sucursalId: ctx.sucursalId,
     clienteId: clienteId !== null && Number.isFinite(clienteId) && clienteId > 0 ? Math.trunc(clienteId) : null,
-    tipoPago: tipoPagoRaw,
     tipoCambioId,
     tipoCambioSnapshot,
     numeroDocumento:
@@ -124,7 +114,9 @@ export async function POST(request: Request) {
     clienteNombreLibre,
     clienteNit,
     lineas,
-    creditoFechaLimite,
+    creditoFechaLimite: null,
+    enviarACaja: true,
+    cajeroDestinoUsuarioId: Math.trunc(cajeroDestinoUsuarioId),
   });
 
   if (!result.ok) {
@@ -134,6 +126,7 @@ export async function POST(request: Request) {
   revalidatePath("/vendedor/ventas");
   revalidatePath("/vendedor/ventas/nueva");
   revalidatePath("/vendedor");
+  revalidatePath("/cajero/cobros");
   revalidatePath("/admin/reportes");
 
   return NextResponse.json({ ventaId: result.ventaId });

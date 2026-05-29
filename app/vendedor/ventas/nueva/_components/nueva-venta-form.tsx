@@ -24,7 +24,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 const inp =
   "w-full min-w-0 rounded border border-white/10 bg-slate-950/80 px-2 py-1.5 text-xs text-white outline-none placeholder:text-slate-600 focus:border-amber-500/40";
@@ -52,6 +52,15 @@ function strNum(s: string | null | undefined): number | null {
 function parseQty(s: string): number {
   const n = Math.trunc(Number(s.replace(",", ".")));
   return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+function snapCantidadToStock(raw: string, stock: number): string {
+  const max = Math.max(0, Math.trunc(stock));
+  const q = parseQty(raw);
+  if (max < 1) return q > 0 ? String(q) : "1";
+  if (q < 1) return "1";
+  if (q > max) return String(max);
+  return String(q);
 }
 
 function parsePrecio(s: string, lista: number | null): number | null {
@@ -189,6 +198,9 @@ function mapCompletoToLookup(p: ProductoVentaCompletoRow): VentaCarritoProducto 
     descripcionMostrar,
     codigoPieza: p.codigo_pieza,
     medida: p.medida,
+    unidad: p.unidad,
+    marcaAuto: p.marca_auto,
+    procedencia: p.procedencia,
     stock: p.stockMiSucursal,
     precio_venta_lista_bs: p.precio_venta_lista_bs,
     precio_venta_lista_usd: p.precio_venta_lista_usd,
@@ -215,12 +227,32 @@ function mapCatalogRowToLookup(r: VentaCatalogoApiRow, miSucursalId: number): Ve
     descripcionMostrar,
     codigoPieza: r.codigo_pieza,
     medida: r.medida,
+    unidad: r.unidad,
+    marcaAuto: r.marca_auto,
+    procedencia: r.procedencia,
     stock,
     precio_venta_lista_bs: strNum(r.precio_venta_lista_bs),
     precio_venta_lista_usd: strNum(r.precio_venta_lista_usd),
     punto_tope: strNum(r.punto_tope),
     qrPayload: (r.qr_payload ?? "").trim() || r.codigo,
     imagenesUrls: Array.isArray(r.imagenes_urls) ? r.imagenes_urls : [],
+  };
+}
+
+/** Líneas sin marca/unidad/procedencia cargados (estado viejo o respuesta incompleta). */
+function carritoProductoSinMetadatos(p: VentaCarritoProducto): boolean {
+  if (!("marcaAuto" in p) || !("unidad" in p) || !("procedencia" in p)) return true;
+  const marca = (p.marcaAuto ?? "").trim();
+  const unidad = (p.unidad ?? "").trim();
+  const procedencia = (p.procedencia ?? "").trim();
+  return marca === "" && unidad === "" && procedencia === "";
+}
+
+function fusionarProductoCarrito(prev: VentaCarritoProducto, fresh: VentaCarritoProducto): VentaCarritoProducto {
+  return {
+    ...prev,
+    ...fresh,
+    stock: fresh.stock,
   };
 }
 
@@ -253,7 +285,8 @@ export function NuevaVentaForm() {
   const [ultimoScanReferencia, setUltimoScanReferencia] = useState<ProductoVentaCompletoRow | null>(null);
 
   const [lineas, setLineas] = useState<VentaCarritoLinea[]>([]);
-  const [tipoPago, setTipoPago] = useState<"efectivo" | "qr" | "tarjeta">("efectivo");
+  const [cajeros, setCajeros] = useState<{ id: number; nombreCompleto: string; username: string }[]>([]);
+  const [cajeroDestinoId, setCajeroDestinoId] = useState("");
   const [clienteNombreLibre, setClienteNombreLibre] = useState("");
   const [clienteNit, setClienteNit] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -267,6 +300,8 @@ export function NuevaVentaForm() {
   const [username, setUsername] = useState("");
   const [reloj, setReloj] = useState(() => new Date());
   const [catalogoExpandido, setCatalogoExpandido] = useState(false);
+  const metadatosHidratadosRef = useRef(new Set<number>());
+  const hidratandoMetadatosRef = useRef(false);
 
   const loadContext = useCallback(async () => {
     setLoadingCtx(true);
@@ -281,6 +316,7 @@ export function NuevaVentaForm() {
         sucursalId?: number;
         sucursalNombre?: string;
         username?: string;
+        cajeros?: { id: number; nombreCompleto: string; username: string }[];
         tipoCambio?: Tc | null;
         error?: string;
       };
@@ -291,6 +327,12 @@ export function NuevaVentaForm() {
       setMiSucursalId(Number(data.sucursalId ?? 0));
       setSucursalNombre(data.sucursalNombre ?? "");
       setUsername(data.username ?? "");
+      const listaCajeros = Array.isArray(data.cajeros) ? data.cajeros : [];
+      setCajeros(listaCajeros);
+      setCajeroDestinoId((prev) => {
+        if (prev && listaCajeros.some((c) => String(c.id) === prev)) return prev;
+        return listaCajeros.length === 1 ? String(listaCajeros[0].id) : "";
+      });
       setTipoCambio(data.tipoCambio ?? null);
     } catch {
       setCtxError("Error de red al cargar datos.");
@@ -303,6 +345,73 @@ export function NuevaVentaForm() {
     void loadContext();
   }, [loadContext]);
 
+  /** Si el catálogo ya trajo la fila, completar marca / procedencia / unidad sin otro request. */
+  useEffect(() => {
+    if (!miSucursalId || catalogRows.length === 0) return;
+    setLineas((prev) => {
+      let changed = false;
+      const next = prev.map((ln) => {
+        if (!carritoProductoSinMetadatos(ln.producto)) return ln;
+        const row = catalogRows.find((r) => r.id === ln.producto.id);
+        if (!row) return ln;
+        changed = true;
+        metadatosHidratadosRef.current.add(ln.producto.id);
+        return {
+          ...ln,
+          producto: fusionarProductoCarrito(ln.producto, mapCatalogRowToLookup(row, miSucursalId)),
+        };
+      });
+      return changed ? next : prev;
+    });
+  }, [catalogRows, miSucursalId]);
+
+  /** Repone metadatos faltantes (p. ej. línea agregada antes del cambio de columnas). */
+  useEffect(() => {
+    if (!miSucursalId || lineas.length === 0 || hidratandoMetadatosRef.current) return;
+    const pending = lineas.filter(
+      (ln) =>
+        carritoProductoSinMetadatos(ln.producto) && !metadatosHidratadosRef.current.has(ln.producto.id)
+    );
+    if (pending.length === 0) return;
+
+    hidratandoMetadatosRef.current = true;
+    let cancelled = false;
+
+    (async () => {
+      const updates = new Map<number, VentaCarritoProducto>();
+      for (const ln of pending) {
+        metadatosHidratadosRef.current.add(ln.producto.id);
+        try {
+          const res = await fetch("/api/vendedor/productos/venta-lookup", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ codigo: ln.producto.codigo }),
+          });
+          const data = (await res.json()) as { producto?: ProductoVentaCompletoRow };
+          if (res.ok && data.producto) {
+            updates.set(ln.producto.id, mapCompletoToLookup(data.producto));
+          }
+        } catch {
+          /* ignorar; no reintentar en bucle */
+        }
+      }
+      if (!cancelled && updates.size > 0) {
+        setLineas((prev) =>
+          prev.map((ln) => {
+            const fresh = updates.get(ln.producto.id);
+            if (!fresh) return ln;
+            return { ...ln, producto: fusionarProductoCarrito(ln.producto, fresh) };
+          })
+        );
+      }
+      hidratandoMetadatosRef.current = false;
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [lineas, miSucursalId]);
+
   useEffect(() => {
     const id = setInterval(() => setReloj(new Date()), 1000);
     return () => clearInterval(id);
@@ -313,7 +422,7 @@ export function NuevaVentaForm() {
     const { ventaId, totalBs, at } = ventaConfirmada;
     if (typeof Notification !== "undefined" && Notification.permission === "granted") {
       try {
-        new Notification("Venta confirmada", {
+        new Notification("Enviado a caja", {
           body: `Venta #${ventaId} · ${totalBs} Bs`,
           tag: `venta-ok-${ventaId}-${at}`,
         });
@@ -350,17 +459,6 @@ export function NuevaVentaForm() {
     return { bs, usd };
   }, [lineas, tcVal]);
 
-  function imprimirFacturaVenta() {
-    if (lineas.length === 0) return;
-    document.documentElement.classList.add("print-solo-factura-venta");
-    const quitarClase = () => {
-      document.documentElement.classList.remove("print-solo-factura-venta");
-    };
-    window.addEventListener("afterprint", quitarClase, { once: true });
-    window.setTimeout(quitarClase, 5000);
-    window.print();
-  }
-
   function agregarAlCarrito(p: VentaCarritoProducto) {
     setUltimoScanReferencia(null);
     setLineas((prev) => {
@@ -373,7 +471,7 @@ export function NuevaVentaForm() {
         const prevPrecio = copy[idx].precioUnitBs.trim();
         copy[idx] = {
           ...copy[idx],
-          producto: p,
+          producto: fusionarProductoCarrito(copy[idx].producto, p),
           cantidad: String(Math.max(1, next)),
           precioUnitBs:
             prevPrecio === "" ? defaultPrecioUnitBsStr(p) : copy[idx].precioUnitBs,
@@ -508,7 +606,9 @@ export function NuevaVentaForm() {
         return;
       }
       if (q > ln.producto.stock) {
-        setMsg({ type: "err", text: `Stock insuficiente para ${ln.producto.codigo} (máx. ${ln.producto.stock}).` });
+        window.alert(
+          `${ln.producto.codigo}: Cantidad no permitida: supera el stock disponible (máx. ${ln.producto.stock}).`
+        );
         return;
       }
       const precioLista = ln.producto.precio_venta_lista_bs;
@@ -538,26 +638,30 @@ export function NuevaVentaForm() {
       });
     }
 
+    if (!cajeroDestinoId.trim()) {
+      setMsg({ type: "err", text: "Elegí el cajero que cobrará esta venta." });
+      return;
+    }
+
     setSubmitting(true);
     try {
       const res = await fetch("/api/vendedor/ventas", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          tipoPago,
+          cajeroDestinoUsuarioId: Number(cajeroDestinoId),
           clienteId: null,
           tipoCambioId: tipoCambio.id,
           tipoCambioSnapshot: tipoCambio.valor_bs_por_usd,
           numeroDocumento: null,
           clienteNombreLibre: clienteNombreLibre.trim() || null,
           clienteNit: clienteNit.trim() || null,
-          creditoFechaLimite: null,
           lineas: payloadLineas,
         }),
       });
       const data = (await res.json()) as { ventaId?: number; error?: string };
       if (!res.ok) {
-        setMsg({ type: "err", text: data.error ?? "No se pudo registrar la venta." });
+        setMsg({ type: "err", text: data.error ?? "No se pudo enviar la venta a caja." });
         return;
       }
       const vid = data.ventaId;
@@ -566,7 +670,6 @@ export function NuevaVentaForm() {
         return;
       }
       setMsg(null);
-      imprimirFacturaVenta();
       setVentaConfirmada({
         ventaId: vid,
         totalBs: totales.bs.toFixed(2),
@@ -602,7 +705,13 @@ export function NuevaVentaForm() {
     );
   }
 
-  const tcBs = tipoCambio?.valor_bs_por_usd ?? null;
+  if (cajeros.length === 0) {
+    return (
+      <div className="rounded-xl border border-amber-500/35 bg-amber-950/30 px-4 py-3 text-sm text-amber-100" role="alert">
+        No hay cajeros activos en tu sucursal. Pedile al administrador que registre un usuario con rol cajero.
+      </div>
+    );
+  }
 
   return (
     <div>
@@ -610,7 +719,6 @@ export function NuevaVentaForm() {
       <VentaVendedorToolbar
         sucursalNombre={sucursalNombre}
         username={username}
-        tipoCambioBsPorUsd={tcBs}
         fechaStr={fechaHoraStr.fecha}
         horaStr={fechaHoraStr.hora}
       />
@@ -644,7 +752,7 @@ export function NuevaVentaForm() {
               <CheckCircle2 className="h-6 w-6" strokeWidth={2} aria-hidden />
             </div>
             <div className="min-w-0 flex-1 pt-0.5">
-              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-emerald-200/90">Venta confirmada</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-emerald-200/90">Enviado a caja</p>
               <p className="mt-1 font-mono text-lg font-semibold tabular-nums text-white">
                 #{ventaConfirmada.ventaId}
               </p>
@@ -685,12 +793,11 @@ export function NuevaVentaForm() {
         </div>
       ) : null}
 
-      {/* Datos del cobro (arriba del lector para ver forma de pago antes de escanear) */}
+      {/* Cliente y envío a caja */}
       <section className="rounded-2xl border border-white/10 bg-slate-950/45 p-4 sm:p-5">
-        <h2 className="text-base font-semibold text-white">Datos del cobro</h2>
+        <h2 className="text-base font-semibold text-white">Cliente y envío a caja</h2>
         <p className="mt-1 text-xs text-slate-500">
-          Solo cobro inmediato (efectivo, QR o tarjeta). Ventas a crédito y cuentas de cliente van en la sección de
-          créditos. El tipo mostrado es referencia en pantalla e impresión.
+          Armá la lista con el cliente; el cobro lo registra el cajero elegido.
         </p>
         <div className="mt-4 flex min-w-0 flex-nowrap items-center gap-x-3 gap-y-0 overflow-x-auto pb-1 sm:gap-x-4">
           <div className="flex shrink-0 items-center gap-2">
@@ -706,20 +813,24 @@ export function NuevaVentaForm() {
           </div>
           <div className="flex shrink-0 items-center gap-2">
             <label
-              htmlFor="venta-tipo-pago"
+              htmlFor="venta-cajero-destino"
               className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide text-slate-500"
             >
-              Forma de pago
+              Cajero
             </label>
             <select
-              id="venta-tipo-pago"
-              className={`${inp} w-auto min-w-[7.5rem]`}
-              value={tipoPago}
-              onChange={(e) => setTipoPago(e.target.value as typeof tipoPago)}
+              id="venta-cajero-destino"
+              className={`${inp} w-auto min-w-[10rem]`}
+              value={cajeroDestinoId}
+              onChange={(e) => setCajeroDestinoId(e.target.value)}
+              required
             >
-              <option value="efectivo">Efectivo</option>
-              <option value="qr">QR</option>
-              <option value="tarjeta">Tarjeta</option>
+              <option value="">Elegir cajero…</option>
+              {cajeros.map((c) => (
+                <option key={c.id} value={String(c.id)}>
+                  {c.nombreCompleto}
+                </option>
+              ))}
             </select>
           </div>
           <div className="flex min-w-[12rem] max-w-md flex-1 items-center gap-2">
@@ -829,125 +940,7 @@ export function NuevaVentaForm() {
         ) : null}
       </section>
 
-      {/* 2 · Carrito */}
-      <section className="space-y-3">
-        <div className="flex flex-wrap items-end justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <ShoppingBag className="h-5 w-5 text-amber-400/90" aria-hidden />
-            <div>
-              <h2 className="text-base font-semibold text-white">Líneas de esta venta</h2>
-              <p className="text-xs text-slate-500">
-                Ajustá cantidades y precio en Bs si hace falta. El precio se carga con{" "}
-                <span className="text-slate-400">precioVenta</span> (lista) y podés cobrar por encima; no puede quedar
-                por debajo de <span className="text-slate-400">P. tope</span>. Si es inferior al tope, salta una alerta y el
-                monto se ajusta al piso al salir del campo.
-                Las columnas se redimensionan arrastrando el borde.
-              </p>
-            </div>
-          </div>
-          <p className="rounded-full border border-white/10 bg-slate-950/80 px-3 py-1 font-mono text-xs text-slate-400">
-            {lineas.length === 0 ? "Vacío" : `${lineas.length} ítem${lineas.length === 1 ? "" : "s"}`}
-          </p>
-        </div>
-        <VentaCarritoTabla
-          lineas={lineas}
-          inpPosClass={inpPos}
-          subtotalLineaBs={subtotalLineaBs}
-          onCantidadChange={(key, value) =>
-            setLineas((prev) => prev.map((x) => (x.key === key ? { ...x, cantidad: value } : x)))
-          }
-          onPrecioChange={(key, value) =>
-            setLineas((prev) =>
-              prev.map((x) =>
-                x.key === key
-                  ? {
-                      ...x,
-                      precioUnitBs: clampPrecioUnitBsInput(value),
-                    }
-                  : x
-              )
-            )
-          }
-          onPrecioBlur={(key) => {
-            const ln = lineas.find((x) => x.key === key);
-            if (ln) {
-              const ingresado = parsePrecioUnitBsExplicito(ln.precioUnitBs);
-              if (ingresado != null) {
-                const chk = validarPrecioVentaBs(ingresado, ln.producto.punto_tope);
-                if (!chk.ok) {
-                  window.alert(chk.message);
-                }
-              }
-            }
-            setLineas((prev) =>
-              prev.map((x) =>
-                x.key === key
-                  ? {
-                      ...x,
-                      precioUnitBs: snapPrecioUnitBsToRange(
-                        x.precioUnitBs,
-                        x.producto.precio_venta_lista_bs,
-                        x.producto.punto_tope
-                      ),
-                    }
-                  : x
-              )
-            );
-          }}
-          onRemove={(key) => setLineas((prev) => prev.filter((x) => x.key !== key))}
-        />
-      </section>
-
-      {/* 3 · Cobro y confirmación */}
-      <form onSubmit={confirmarVenta} className="space-y-5">
-        <div className="flex flex-col gap-4 rounded-2xl border border-amber-500/20 bg-slate-950/60 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
-          <div>
-            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Total a cobrar</p>
-            <p className="mt-1 font-mono text-3xl font-semibold tabular-nums text-amber-50">{totales.bs.toFixed(2)}</p>
-            <p className="text-sm text-amber-200/80">bolivianos</p>
-            {tcVal > 0 ? (
-              <p className="mt-2 font-mono text-sm text-slate-500">
-                ≈ <span className="text-slate-300">{totales.usd.toFixed(4)}</span> USD al tipo del día
-              </p>
-            ) : (
-              <p className="mt-2 text-xs text-amber-200/60">Sin conversión a USD: no hay tipo de cambio cargado.</p>
-            )}
-          </div>
-
-          <div className="flex flex-wrap items-center justify-end gap-2 border-t border-white/5 pt-4 sm:border-t-0 sm:pt-0">
-            <button
-              type="button"
-              className="inline-flex items-center gap-2 rounded-xl border border-rose-500/40 bg-rose-950/40 px-3 py-2 text-sm text-rose-100 hover:bg-rose-900/55"
-              onClick={() => {
-                if (lineas.length === 0 && !clienteNombreLibre.trim() && !clienteNit.trim()) return;
-                if (!confirm("¿Descartar esta venta y limpiar datos del cobro?")) return;
-                setLineas([]);
-                setClienteNombreLibre("");
-                setClienteNit("");
-                setTipoPago("efectivo");
-                setMsg(null);
-              }}
-            >
-              <OctagonX className="h-4 w-4" />
-              Descartar
-            </button>
-            <button
-              type="submit"
-              disabled={submitting || !tipoCambio || lineas.length === 0}
-              className="inline-flex min-w-[140px] items-center justify-center gap-2 rounded-xl bg-amber-500 py-2.5 pl-5 pr-6 text-sm font-semibold text-slate-950 shadow-lg shadow-amber-900/25 transition hover:bg-amber-400 disabled:pointer-events-none disabled:opacity-40"
-            >
-              {submitting ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <CheckCircle2 className="h-4 w-4" strokeWidth={2.5} />
-              )}
-              Confirmar venta
-            </button>
-          </div>
-        </div>
-      </form>
-
-      {/* 4 · Buscador de catálogo */}
+      {/* 2 · Buscador de catálogo */}
       <section className="space-y-3 border-t border-white/10 pt-6">
         <button
           type="button"
@@ -1094,74 +1087,132 @@ export function NuevaVentaForm() {
           </div>
         ) : null}
       </section>
-      </div>
 
-      <div
-        id="factura-venta-proforma"
-        className="hidden bg-white text-[11px] leading-snug text-slate-900 print:block"
-        role="document"
-        aria-label="Factura preliminar de venta"
-      >
-        <div className="border-b border-slate-300 pb-2">
-          <p className="text-base font-bold tracking-tight text-slate-900">Nota de venta</p>
-          <p className="mt-0.5 font-mono text-[10px] text-slate-600">Tipo nota: proforma_1</p>
-          <p className="mt-1 font-semibold text-slate-800">{sucursalNombre}</p>
-          <p className="mt-0.5 font-mono text-[10px] text-slate-600">
-            {fechaHoraStr.fecha} · {fechaHoraStr.hora} (La Paz)
-          </p>
-          <p className="mt-0.5 text-[10px] text-slate-700">Vendedor: {username || "—"}</p>
-        </div>
-
-        {clienteNombreLibre.trim() || clienteNit.trim() ? (
-          <div className="mt-2 border-b border-slate-200 pb-2 text-[10px] text-slate-800">
-            {clienteNombreLibre.trim() ? <p>Cliente: {clienteNombreLibre.trim()}</p> : null}
-            {clienteNit.trim() ? <p className="font-mono">NIT: {clienteNit.trim()}</p> : null}
+      {/* 3 · Líneas de esta venta */}
+      <section className="space-y-3">
+        <div className="flex flex-wrap items-end justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <ShoppingBag className="h-5 w-5 text-amber-400/90" aria-hidden />
+            <div>
+              <h2 className="text-base font-semibold text-white">Líneas de esta venta</h2>
+            </div>
           </div>
-        ) : null}
-
-        <p className="mt-2 text-[10px] text-slate-800">
-          <span className="font-semibold">Forma de pago:</span>{" "}
-          {tipoPago === "efectivo" ? "Efectivo" : tipoPago === "qr" ? "QR" : "Tarjeta"}
-        </p>
-
-        <table className="mt-3 w-full border-collapse border border-slate-400 text-[10px]">
-          <thead>
-            <tr className="bg-slate-100 text-left text-slate-900">
-              <th className="border border-slate-400 px-1.5 py-1 font-semibold">Código</th>
-              <th className="border border-slate-400 px-1.5 py-1 font-semibold">Descripción</th>
-              <th className="border border-slate-400 px-1 py-1 text-right font-semibold">Cant.</th>
-              <th className="border border-slate-400 px-1 py-1 text-right font-semibold">P. unit. Bs</th>
-              <th className="border border-slate-400 px-1 py-1 text-right font-semibold">Subt. Bs</th>
-            </tr>
-          </thead>
-          <tbody>
-            {lineas.map((ln) => {
-              const unit = precioUnitLineaEfectivo(ln);
-              const sub = subtotalLineaBs(ln);
-              const p = ln.producto;
-              return (
-                <tr key={ln.key}>
-                  <td className="border border-slate-300 px-1.5 py-1 font-mono align-top text-slate-900">{p.codigo}</td>
-                  <td className="border border-slate-300 px-1.5 py-1 align-top text-slate-800">{p.descripcionMostrar}</td>
-                  <td className="border border-slate-300 px-1 py-1 text-right font-mono align-top text-slate-900">
-                    {ln.cantidad}
-                  </td>
-                  <td className="border border-slate-300 px-1 py-1 text-right font-mono align-top text-slate-900">
-                    {unit != null ? unit.toFixed(2) : "—"}
-                  </td>
-                  <td className="border border-slate-300 px-1 py-1 text-right font-mono align-top text-slate-900">
-                    {sub != null ? sub.toFixed(2) : "—"}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-
-        <div className="mt-3 flex items-end justify-between border-t-2 border-slate-800 pt-2 text-slate-900">
-          <span className="text-xs font-bold uppercase">Total</span>
-          <span className="font-mono text-sm font-bold">{totales.bs.toFixed(2)} Bs</span>
+          <p className="rounded-full border border-white/10 bg-slate-950/80 px-3 py-1 font-mono text-xs text-slate-400">
+            {lineas.length === 0 ? "Vacío" : `${lineas.length} ítem${lineas.length === 1 ? "" : "s"}`}
+          </p>
         </div>
+        <VentaCarritoTabla
+          lineas={lineas}
+          inpPosClass={inpPos}
+          subtotalLineaBs={subtotalLineaBs}
+          onCantidadChange={(key, value) =>
+            setLineas((prev) => prev.map((x) => (x.key === key ? { ...x, cantidad: value } : x)))
+          }
+          onCantidadBlur={(key) => {
+            const ln = lineas.find((x) => x.key === key);
+            if (ln) {
+              const q = parseQty(ln.cantidad);
+              const stock = ln.producto.stock;
+              if (stock > 0 && q > stock) {
+                window.alert(
+                  `Cantidad no permitida: supera el stock disponible (máx. ${stock}).`
+                );
+              }
+            }
+            setLineas((prev) =>
+              prev.map((x) =>
+                x.key === key
+                  ? { ...x, cantidad: snapCantidadToStock(x.cantidad, x.producto.stock) }
+                  : x
+              )
+            );
+          }}
+          onPrecioChange={(key, value) =>
+            setLineas((prev) =>
+              prev.map((x) =>
+                x.key === key
+                  ? {
+                      ...x,
+                      precioUnitBs: clampPrecioUnitBsInput(value),
+                    }
+                  : x
+              )
+            )
+          }
+          onPrecioBlur={(key) => {
+            const ln = lineas.find((x) => x.key === key);
+            if (ln) {
+              const ingresado = parsePrecioUnitBsExplicito(ln.precioUnitBs);
+              if (ingresado != null) {
+                const chk = validarPrecioVentaBs(ingresado, ln.producto.punto_tope);
+                if (!chk.ok) {
+                  window.alert(chk.message);
+                }
+              }
+            }
+            setLineas((prev) =>
+              prev.map((x) =>
+                x.key === key
+                  ? {
+                      ...x,
+                      precioUnitBs: snapPrecioUnitBsToRange(
+                        x.precioUnitBs,
+                        x.producto.precio_venta_lista_bs,
+                        x.producto.punto_tope
+                      ),
+                    }
+                  : x
+              )
+            );
+          }}
+          onRemove={(key) => setLineas((prev) => prev.filter((x) => x.key !== key))}
+        />
+      </section>
+
+
+      {/* 4 · Cobro y confirmación */}
+      <form onSubmit={confirmarVenta} className="space-y-5">
+        <div className="flex flex-col gap-4 rounded-2xl border border-amber-500/20 bg-slate-950/60 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Total de la venta</p>
+            <p className="mt-1 font-mono text-3xl font-semibold tabular-nums text-amber-50">{totales.bs.toFixed(2)}</p>
+            <p className="text-sm text-amber-200/80">bolivianos</p>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-end gap-2 border-t border-white/5 pt-4 sm:border-t-0 sm:pt-0">
+            <button
+              type="button"
+              className="inline-flex items-center gap-2 rounded-xl border border-rose-500/40 bg-rose-950/40 px-3 py-2 text-sm text-rose-100 hover:bg-rose-900/55"
+              onClick={() => {
+                if (lineas.length === 0 && !clienteNombreLibre.trim() && !clienteNit.trim()) return;
+                if (!confirm("¿Descartar esta venta y limpiar los datos?")) return;
+                setLineas([]);
+                setClienteNombreLibre("");
+                setClienteNit("");
+                setCajeroDestinoId(cajeros.length === 1 ? String(cajeros[0].id) : "");
+                setMsg(null);
+              }}
+            >
+              <OctagonX className="h-4 w-4" />
+              Descartar
+            </button>
+            <button
+              type="submit"
+              disabled={submitting || !tipoCambio || lineas.length === 0 || !cajeroDestinoId.trim() || cajeros.length === 0}
+              className="inline-flex min-w-[140px] items-center justify-center gap-2 rounded-xl bg-amber-500 py-2.5 pl-5 pr-6 text-sm font-semibold text-slate-950 shadow-lg shadow-amber-900/25 transition hover:bg-amber-400 disabled:pointer-events-none disabled:opacity-40"
+            >
+              {submitting ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <CheckCircle2 className="h-4 w-4" strokeWidth={2.5} />
+              )}
+              Enviar a caja
+            </button>
+          </div>
+        </div>
+      </form>
+
+
       </div>
     </div>
   );

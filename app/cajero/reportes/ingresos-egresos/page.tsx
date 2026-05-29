@@ -1,26 +1,28 @@
-import { ArqueoVendedoresPanel } from "@/app/cajero/reportes/arqueo-vendedores/_components/arqueo-vendedores-panel";
+import { IngresosEgresosPanel } from "@/app/cajero/reportes/ingresos-egresos/_components/ingresos-egresos-panel";
 import { PanelSection } from "@/app/_components/panel-section";
 import { VentasHistorialFiltroFechas } from "@/app/vendedor/ventas/_components/ventas-historial-filtro-fechas";
+import { requireCajeroContext } from "@/lib/auth/staff-panel-context";
 import { formatDateTimeMysqlBolivia, parseIsoDateOnly } from "@/lib/fecha-bolivia";
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 
 export const metadata: Metadata = {
-  title: "Arqueo por vendedor",
+  title: "Ingresos y egresos",
 };
 
-export default async function CajeroArqueoVendedoresPage({
+export default async function CajeroIngresosEgresosPage({
   searchParams,
 }: {
   searchParams: Promise<{ desde?: string; hasta?: string }>;
 }) {
+  await requireCajeroContext();
   const sp = await searchParams;
   const hoy = formatDateTimeMysqlBolivia(new Date()).slice(0, 10);
   const desdeParam = sp.desde?.trim() ?? "";
   const hastaParam = sp.hasta?.trim() ?? "";
 
   if (desdeParam === "" && hastaParam === "") {
-    redirect(`/cajero/reportes/arqueo-vendedores?desde=${hoy}&hasta=${hoy}`);
+    redirect(`/cajero/reportes/ingresos-egresos?desde=${hoy}&hasta=${hoy}`);
   }
 
   const desdeParsed = desdeParam ? parseIsoDateOnly(desdeParam) : null;
@@ -45,19 +47,28 @@ export default async function CajeroArqueoVendedoresPage({
 
   const hayParamsFiltro = desdeParam !== "" || hastaParam !== "";
   const useFiltro = Boolean(fDesde && fHasta && !filtroError);
-  const apiDesde = useFiltro ? fDesde! : hoy;
-  const apiHasta = useFiltro ? fHasta! : hoy;
+  const apiFecha = useFiltro ? fDesde! : hoy;
 
-  const clearHref = `/cajero/reportes/arqueo-vendedores?desde=${hoy}&hasta=${hoy}`;
+  if (useFiltro && fDesde !== fHasta) {
+    filtroError =
+      filtroError ??
+      "Para ingresos y egresos elegí el mismo día en «Desde» y «Hasta» (reporte diario).";
+  }
+
+  const clearHref = `/cajero/reportes/ingresos-egresos?desde=${hoy}&hasta=${hoy}`;
 
   return (
     <PanelSection
       variant="cajero"
       wide
-      title="Arqueo por vendedor"
+      title="Ingresos y egresos del día"
+      description="Registrá gastos, devoluciones, cambios de producto, compra de dólares e imprimí el reporte del día con ventas confirmadas."
     >
       {filtroError ? (
-        <p className="mb-4 rounded-xl border border-rose-500/35 bg-rose-950/30 px-4 py-3 text-sm text-rose-100" role="alert">
+        <p
+          className="mb-4 rounded-xl border border-rose-500/35 bg-rose-950/30 px-4 py-3 text-sm text-rose-100"
+          role="alert"
+        >
           {filtroError}
         </p>
       ) : null}
@@ -67,14 +78,16 @@ export default async function CajeroArqueoVendedoresPage({
           defaultDesde={desdeParsed}
           defaultHasta={hastaParsed}
           hayParamsFiltro={hayParamsFiltro}
-          formAction="/cajero/reportes/arqueo-vendedores"
+          formAction="/cajero/reportes/ingresos-egresos"
           clearHref={clearHref}
           accent="cajero"
-          fieldIdPrefix="arqueo"
+          fieldIdPrefix="ie"
         />
       </div>
 
-      <ArqueoVendedoresPanel fechaDesde={apiDesde} fechaHasta={apiHasta} />
+      {!filtroError ? (
+        <IngresosEgresosPanel fecha={apiFecha} />
+      ) : null}
     </PanelSection>
   );
 }

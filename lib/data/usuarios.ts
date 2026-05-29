@@ -14,6 +14,29 @@ export type UsuarioListRow = {
   activo: number;
 };
 
+export type CajeroSucursalOpt = {
+  id: number;
+  nombreCompleto: string;
+  username: string;
+};
+
+/** Cajeros activos de la sucursal (rol 2). */
+export async function listCajerosActivosPorSucursal(sucursalId: number): Promise<CajeroSucursalOpt[]> {
+  if (!Number.isFinite(sucursalId) || sucursalId < 1) return [];
+  const [rows] = await pool.execute<RowDataPacket[]>(
+    `SELECT id, nombre_completo, username
+     FROM usuarios
+     WHERE rol_id = 2 AND sucursal_id = ? AND activo = 1
+     ORDER BY nombre_completo ASC, username ASC`,
+    [sucursalId]
+  );
+  return (rows as RowDataPacket[]).map((r) => ({
+    id: Number(r.id),
+    nombreCompleto: String(r.nombre_completo ?? "").trim() || String(r.username ?? ""),
+    username: String(r.username ?? ""),
+  }));
+}
+
 export async function listUsuarios(): Promise<UsuarioListRow[]> {
   const [rows] = await pool.execute<RowDataPacket[]>(
     `SELECT u.id, u.nombre_completo, u.username, u.rol_id, r.nombre AS rol_nombre,

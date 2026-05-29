@@ -12,7 +12,10 @@ export type ProductoVentaCompletoRow = {
   nombre: string;
   codigo_pieza: string | null;
   medida: string | null;
+  unidad: string | null;
   descripcion: string | null;
+  marca_auto: string | null;
+  procedencia: string | null;
   qr_payload: string;
   /** URLs de galería (orden catálogo). */
   imagenes_urls: string[];
@@ -30,7 +33,10 @@ export type VentaCatalogoApiRow = {
   nombre: string;
   codigo_pieza: string | null;
   medida: string | null;
+  unidad: string | null;
   descripcion: string | null;
+  marca_auto: string | null;
+  procedencia: string | null;
   qr_payload: string;
   imagenes_urls: string[];
   precio_venta_lista_bs: string | null;

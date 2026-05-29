@@ -1,5 +1,6 @@
 import { AdminButtonLink } from "@/app/admin/_components/admin-button-link";
 import { CatalogoSearchInput } from "@/app/admin/productos/_components/catalogo-search-input";
+import { ProductosExportOskCsvButton } from "@/app/admin/productos/_components/productos-export-osk-csv-button";
 import { ProductosCatalogoTabla } from "@/app/admin/productos/_components/productos-catalogo-tabla";
 import type { SucursalRow } from "@/lib/data/sucursales";
 import {
@@ -178,7 +179,10 @@ export function ProductosCatalogo({
               Limpiar
             </Link>
           </div>
-          <AdminButtonLink href="/admin/productos/nueva">Nuevo producto</AdminButtonLink>
+          <div className="flex flex-wrap items-center gap-2">
+            <ProductosExportOskCsvButton />
+            <AdminButtonLink href="/admin/productos/nueva">Nuevo producto</AdminButtonLink>
+          </div>
         </div>
       </form>
 

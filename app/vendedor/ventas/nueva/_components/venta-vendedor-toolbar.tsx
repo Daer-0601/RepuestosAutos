@@ -5,21 +5,14 @@ import { Store } from "lucide-react";
 export function VentaVendedorToolbar({
   sucursalNombre,
   username,
-  tipoCambioBsPorUsd,
   fechaStr,
   horaStr,
 }: {
   sucursalNombre: string;
   username: string;
-  tipoCambioBsPorUsd: number | null;
   fechaStr: string;
   horaStr: string;
 }) {
-  const tc =
-    tipoCambioBsPorUsd != null && tipoCambioBsPorUsd > 0
-      ? `${tipoCambioBsPorUsd.toFixed(2)} Bs/USD`
-      : "Sin tipo de cambio";
-
   return (
     <header className="flex flex-col gap-4 rounded-2xl border border-amber-500/20 bg-slate-950/70 px-4 py-4 shadow-lg shadow-black/20 sm:flex-row sm:items-stretch sm:justify-between sm:gap-6">
       <div className="flex min-w-0 flex-1 items-center gap-3">
@@ -43,16 +36,10 @@ export function VentaVendedorToolbar({
         </div>
       </div>
 
-      <dl className="grid shrink-0 grid-cols-2 gap-x-6 gap-y-2 text-right sm:min-w-[220px] sm:content-center">
+      <dl className="shrink-0 text-right sm:min-w-[120px] sm:content-center">
         <div>
           <dt className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Usuario</dt>
           <dd className="truncate font-mono text-sm text-slate-200">{username || "—"}</dd>
-        </div>
-        <div>
-          <dt className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Tipo de cambio</dt>
-          <dd className={`font-mono text-sm ${tipoCambioBsPorUsd ? "text-emerald-300/95" : "text-amber-200/70"}`}>
-            {tc}
-          </dd>
         </div>
       </dl>
     </header>
