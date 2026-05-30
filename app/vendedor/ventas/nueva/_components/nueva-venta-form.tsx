@@ -7,9 +7,29 @@ import {
 } from "@/app/vendedor/ventas/nueva/_components/venta-carrito-tabla";
 import { VentaCatalogoTabla } from "@/app/vendedor/ventas/nueva/_components/venta-catalogo-tabla";
 import { VentaVendedorToolbar } from "@/app/vendedor/ventas/nueva/_components/venta-vendedor-toolbar";
+import {
+  ClienteCreditoBuscador,
+  type ClienteCreditoSeleccionado,
+} from "@/app/vendedor/ventas/nueva/_components/cliente-credito-buscador";
 import { CATALOGO_FILAS_DEFAULT } from "@/lib/catalogo-productos-constants";
-import { precioVentaBsPiso, validarPrecioVentaBs } from "@/lib/venta-precio-lista-tope-range";
 import type { ModoCatalogoVenta, ProductoVentaCompletoRow, VentaCatalogoApiRow } from "@/lib/types/venta-vendedor-catalogo";
+import {
+  carritoProductoSinMetadatos,
+  clampPrecioUnitBsInput,
+  defaultPrecioUnitBsStr,
+  fusionarProductoCarrito,
+  mapCatalogRowToLookup,
+  mapCompletoToLookup,
+  parsePrecioUnitBsExplicito,
+  parseQty,
+  precioUnitLineaEfectivo,
+  round2,
+  round4,
+  snapCantidadToStock,
+  snapPrecioUnitBsToRange,
+  subtotalLineaBs,
+} from "@/lib/vendedor/venta-carrito-helpers";
+import { validarPrecioVentaBs } from "@/lib/venta-precio-lista-tope-range";
 import {
   CheckCircle2,
   ChevronDown,
@@ -34,227 +54,6 @@ const inpPos =
   "w-full min-w-0 rounded border border-slate-600/80 bg-slate-950/90 px-1.5 py-1 text-[11px] text-slate-100 outline-none focus:border-amber-500/50";
 
 type Tc = { id: number; valor_bs_por_usd: number };
-
-function round2(n: number) {
-  return Math.round(n * 100) / 100;
-}
-
-function round4(n: number) {
-  return Math.round(n * 1e4) / 1e4;
-}
-
-function strNum(s: string | null | undefined): number | null {
-  if (s == null || s === "") return null;
-  const n = Number(s);
-  return Number.isFinite(n) ? n : null;
-}
-
-function parseQty(s: string): number {
-  const n = Math.trunc(Number(s.replace(",", ".")));
-  return Number.isFinite(n) && n > 0 ? n : 0;
-}
-
-function snapCantidadToStock(raw: string, stock: number): string {
-  const max = Math.max(0, Math.trunc(stock));
-  const q = parseQty(raw);
-  if (max < 1) return q > 0 ? String(q) : "1";
-  if (q < 1) return "1";
-  if (q > max) return String(max);
-  return String(q);
-}
-
-function parsePrecio(s: string, lista: number | null): number | null {
-  const t = s.trim();
-  if (!t) {
-    return lista !== null && lista > 0 ? round2(lista) : null;
-  }
-  const n = Number(t.replace(",", "."));
-  return Number.isFinite(n) && n > 0 ? round2(n) : null;
-}
-
-/** Solo dígitos y un separador decimal (coma o punto → un solo punto). */
-function sanitizePrecioUnitBsDigitos(raw: string): string {
-  const s = raw.replace(/,/g, ".");
-  let out = "";
-  let dot = false;
-  for (const ch of s) {
-    if (ch >= "0" && ch <= "9") {
-      out += ch;
-      continue;
-    }
-    if (ch === "." && !dot) {
-      out += ".";
-      dot = true;
-    }
-  }
-  return out;
-}
-
-function precioUnitLineaEfectivo(ln: VentaCarritoLinea): number | null {
-  return parsePrecio(ln.precioUnitBs, ln.producto.precio_venta_lista_bs);
-}
-
-/** Valor inicial del campo: siempre precio de lista (precioVenta), nunca el tope. */
-function defaultPrecioUnitBsStr(p: { precio_venta_lista_bs: number | null }): string {
-  const lista = p.precio_venta_lista_bs;
-  if (lista != null && Number.isFinite(lista) && lista > 0) {
-    return String(round2(lista));
-  }
-  return "";
-}
-
-/** Al escribir: solo números; sin tope superior. El piso (P. tope) se valida al salir del campo. */
-function clampPrecioUnitBsInput(raw: string): string {
-  const cleaned = sanitizePrecioUnitBsDigitos(raw);
-  const t = cleaned.trim();
-  if (t === "" || t === ".") return t;
-
-  if (/^\d+\.$/.test(t)) {
-    return t;
-  }
-
-  const n = Number(t);
-  if (!Number.isFinite(n) || n < 0) return "";
-
-  const v = round2(n);
-  if (v <= 0) return "";
-
-  return String(v);
-}
-
-/** Al blur: vacío o inválido → precio de lista; si hay tope, sube al piso mínimo. */
-function snapPrecioUnitBsToRange(raw: string, lista: number | null, tope: number | null): string {
-  const cleaned = sanitizePrecioUnitBsDigitos(raw);
-  const t = cleaned.trim();
-  if (t === "" || t === ".") {
-    return defaultPrecioUnitBsStr({ precio_venta_lista_bs: lista });
-  }
-  const parseT = t.endsWith(".") ? t.slice(0, -1) : t;
-  const n = Number(parseT);
-  if (!Number.isFinite(n) || n <= 0) {
-    return defaultPrecioUnitBsStr({ precio_venta_lista_bs: lista });
-  }
-  let v = round2(n);
-  const piso = precioVentaBsPiso(tope);
-  if (piso != null) v = Math.max(v, piso);
-  return String(v);
-}
-
-function parsePrecioUnitBsExplicito(raw: string): number | null {
-  const t = sanitizePrecioUnitBsDigitos(raw).trim();
-  if (!t || t === ".") return null;
-  const parseT = t.endsWith(".") ? t.slice(0, -1) : t;
-  const n = Number(parseT);
-  return Number.isFinite(n) && n > 0 ? round2(n) : null;
-}
-
-function subtotalLineaBs(ln: VentaCarritoLinea): number | null {
-  const q = parseQty(ln.cantidad);
-  if (q < 1) return null;
-  const p = precioUnitLineaEfectivo(ln);
-  if (p === null) return null;
-  return round2(q * p);
-}
-
-/** Columna «Descripción»: evita repetir código, pieza, QR o el mismo texto que ya va en «Medida». */
-function descripcionMostrarEnLineaVenta(input: {
-  codigo: string;
-  nombre: string;
-  descripcion: string | null | undefined;
-  codigo_pieza: string | null | undefined;
-  medida?: string | null;
-  qr_payload?: string | null;
-}): string {
-  const nombre = input.nombre.trim();
-  const descRaw = (input.descripcion ?? "").trim();
-  if (!descRaw) return nombre;
-  const norm = (s: string) => s.trim().toLowerCase().replace(/\./g, "");
-  const d = norm(descRaw);
-  if (d === norm(nombre)) return nombre;
-  const pieza = (input.codigo_pieza ?? "").trim();
-  if (pieza && d === norm(pieza)) return nombre;
-  const cod = input.codigo.trim();
-  if (cod && d === norm(cod)) return nombre;
-  const qr = (input.qr_payload ?? "").trim();
-  if (qr && d === norm(qr)) return nombre;
-  const med = (input.medida ?? "").trim();
-  if (med && d === norm(med)) return nombre;
-  return descRaw;
-}
-
-function mapCompletoToLookup(p: ProductoVentaCompletoRow): VentaCarritoProducto {
-  const descripcionMostrar = descripcionMostrarEnLineaVenta({
-    codigo: p.codigo,
-    nombre: p.nombre,
-    descripcion: p.descripcion,
-    codigo_pieza: p.codigo_pieza,
-    medida: p.medida,
-    qr_payload: p.qr_payload,
-  });
-  return {
-    id: p.id,
-    codigo: p.codigo,
-    nombre: p.nombre,
-    descripcionMostrar,
-    codigoPieza: p.codigo_pieza,
-    medida: p.medida,
-    unidad: p.unidad,
-    marcaAuto: p.marca_auto,
-    procedencia: p.procedencia,
-    stock: p.stockMiSucursal,
-    precio_venta_lista_bs: p.precio_venta_lista_bs,
-    precio_venta_lista_usd: p.precio_venta_lista_usd,
-    punto_tope: p.punto_tope,
-    qrPayload: p.qr_payload?.trim() ? p.qr_payload.trim() : p.codigo,
-    imagenesUrls: Array.isArray(p.imagenes_urls) ? p.imagenes_urls : [],
-  };
-}
-
-function mapCatalogRowToLookup(r: VentaCatalogoApiRow, miSucursalId: number): VentaCarritoProducto {
-  const stock = r.stocksPorSucursal.find((x) => x.sucursalId === miSucursalId)?.stock ?? 0;
-  const descripcionMostrar = descripcionMostrarEnLineaVenta({
-    codigo: r.codigo,
-    nombre: r.nombre,
-    descripcion: r.descripcion,
-    codigo_pieza: r.codigo_pieza,
-    medida: r.medida,
-    qr_payload: r.qr_payload,
-  });
-  return {
-    id: r.id,
-    codigo: r.codigo,
-    nombre: r.nombre,
-    descripcionMostrar,
-    codigoPieza: r.codigo_pieza,
-    medida: r.medida,
-    unidad: r.unidad,
-    marcaAuto: r.marca_auto,
-    procedencia: r.procedencia,
-    stock,
-    precio_venta_lista_bs: strNum(r.precio_venta_lista_bs),
-    precio_venta_lista_usd: strNum(r.precio_venta_lista_usd),
-    punto_tope: strNum(r.punto_tope),
-    qrPayload: (r.qr_payload ?? "").trim() || r.codigo,
-    imagenesUrls: Array.isArray(r.imagenes_urls) ? r.imagenes_urls : [],
-  };
-}
-
-/** Líneas sin marca/unidad/procedencia cargados (estado viejo o respuesta incompleta). */
-function carritoProductoSinMetadatos(p: VentaCarritoProducto): boolean {
-  if (!("marcaAuto" in p) || !("unidad" in p) || !("procedencia" in p)) return true;
-  const marca = (p.marcaAuto ?? "").trim();
-  const unidad = (p.unidad ?? "").trim();
-  const procedencia = (p.procedencia ?? "").trim();
-  return marca === "" && unidad === "" && procedencia === "";
-}
-
-function fusionarProductoCarrito(prev: VentaCarritoProducto, fresh: VentaCarritoProducto): VentaCarritoProducto {
-  return {
-    ...prev,
-    ...fresh,
-    stock: fresh.stock,
-  };
-}
 
 export function NuevaVentaForm() {
   const router = useRouter();
@@ -287,6 +86,8 @@ export function NuevaVentaForm() {
   const [lineas, setLineas] = useState<VentaCarritoLinea[]>([]);
   const [cajeros, setCajeros] = useState<{ id: number; nombreCompleto: string; username: string }[]>([]);
   const [cajeroDestinoId, setCajeroDestinoId] = useState("");
+  const [esCredito, setEsCredito] = useState(false);
+  const [clienteCredito, setClienteCredito] = useState<ClienteCreditoSeleccionado | null>(null);
   const [clienteNombreLibre, setClienteNombreLibre] = useState("");
   const [clienteNit, setClienteNit] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -639,7 +440,11 @@ export function NuevaVentaForm() {
     }
 
     if (!cajeroDestinoId.trim()) {
-      setMsg({ type: "err", text: "Elegí el cajero que cobrará esta venta." });
+      setMsg({ type: "err", text: "Elegí el cajero que atenderá esta venta en caja." });
+      return;
+    }
+    if (esCredito && !clienteCredito) {
+      setMsg({ type: "err", text: "Buscá y elegí un cliente registrado para la venta a crédito." });
       return;
     }
 
@@ -650,12 +455,13 @@ export function NuevaVentaForm() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           cajeroDestinoUsuarioId: Number(cajeroDestinoId),
-          clienteId: null,
+          esCredito,
+          clienteId: esCredito && clienteCredito ? clienteCredito.id : null,
           tipoCambioId: tipoCambio.id,
           tipoCambioSnapshot: tipoCambio.valor_bs_por_usd,
           numeroDocumento: null,
-          clienteNombreLibre: clienteNombreLibre.trim() || null,
-          clienteNit: clienteNit.trim() || null,
+          clienteNombreLibre: esCredito ? null : clienteNombreLibre.trim() || null,
+          clienteNit: esCredito ? null : clienteNit.trim() || null,
           lineas: payloadLineas,
         }),
       });
@@ -797,18 +603,32 @@ export function NuevaVentaForm() {
       <section className="rounded-2xl border border-white/10 bg-slate-950/45 p-4 sm:p-5">
         <h2 className="text-base font-semibold text-white">Cliente y envío a caja</h2>
         <p className="mt-1 text-xs text-slate-500">
-          Armá la lista con el cliente; el cobro lo registra el cajero elegido.
+          {esCredito
+            ? "Crédito: buscá un cliente de tu directorio, enviá a caja y el cajero entrega con Nota de entrega. Pago único en caja dentro de 1 mes."
+            : "Armá la lista; el cobro al contado lo registra el cajero elegido."}
         </p>
-        <div className="mt-4 flex min-w-0 flex-nowrap items-center gap-x-3 gap-y-0 overflow-x-auto pb-1 sm:gap-x-4">
+        <label className="mt-4 flex cursor-pointer items-center gap-2 text-sm text-amber-100">
+          <input
+            type="checkbox"
+            checked={esCredito}
+            onChange={(e) => {
+              setEsCredito(e.target.checked);
+              if (!e.target.checked) setClienteCredito(null);
+            }}
+            className="rounded border-white/20"
+          />
+          Venta a crédito (cliente registrado, pago único en 1 mes)
+        </label>
+        <div className="mt-4 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-3 pb-1 sm:gap-x-4">
           <div className="flex shrink-0 items-center gap-2">
             <span className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide text-slate-500">
               Tipo (nota)
             </span>
             <span
               className={`${inp} inline-flex cursor-default items-center border-white/15 bg-slate-900/60 py-1.5 pl-2 pr-2.5 font-mono text-slate-200`}
-              title="Tipo fijo para esta pantalla"
+              title="Tipo de comprobante"
             >
-              proforma_1
+              {esCredito ? "nota_entrega" : "proforma_1"}
             </span>
           </div>
           <div className="flex shrink-0 items-center gap-2">
@@ -833,38 +653,53 @@ export function NuevaVentaForm() {
               ))}
             </select>
           </div>
-          <div className="flex min-w-[12rem] max-w-md flex-1 items-center gap-2">
-            <label
-              htmlFor="venta-cliente-nombre"
-              className="shrink-0 whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide text-slate-500"
-            >
-              Nombre del cliente <span className="font-normal normal-case text-slate-600">(opcional)</span>
-            </label>
-            <input
-              id="venta-cliente-nombre"
-              className={`${inp} min-w-[8rem] flex-1`}
-              value={clienteNombreLibre}
-              onChange={(e) => setClienteNombreLibre(e.target.value)}
-              placeholder="Ej. razón social o nombre"
-              autoComplete="name"
-            />
-          </div>
-          <div className="flex shrink-0 items-center gap-2">
-            <label
-              htmlFor="venta-cliente-nit"
-              className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide text-slate-500"
-            >
-              NIT <span className="font-normal normal-case text-slate-600">(opcional)</span>
-            </label>
-            <input
-              id="venta-cliente-nit"
-              className={`${inp} w-[7.5rem] min-w-[7rem] font-mono sm:w-36`}
-              value={clienteNit}
-              onChange={(e) => setClienteNit(e.target.value)}
-              placeholder="NIT"
-              autoComplete="off"
-            />
-          </div>
+          {esCredito ? (
+            <div className="flex min-w-[16rem] flex-1 flex-col gap-1 sm:flex-row sm:items-center">
+              <label className="shrink-0 whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                Cliente <span className="text-rose-400">*</span>
+              </label>
+              <ClienteCreditoBuscador
+                value={clienteCredito}
+                onChange={setClienteCredito}
+                disabled={submitting}
+              />
+            </div>
+          ) : (
+            <>
+              <div className="flex min-w-[12rem] max-w-md flex-1 items-center gap-2">
+                <label
+                  htmlFor="venta-cliente-nombre"
+                  className="shrink-0 whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide text-slate-500"
+                >
+                  Nombre del cliente <span className="font-normal normal-case text-slate-600">(opcional)</span>
+                </label>
+                <input
+                  id="venta-cliente-nombre"
+                  className={`${inp} min-w-[8rem] flex-1`}
+                  value={clienteNombreLibre}
+                  onChange={(e) => setClienteNombreLibre(e.target.value)}
+                  placeholder="Ej. razón social o nombre"
+                  autoComplete="name"
+                />
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                <label
+                  htmlFor="venta-cliente-nit"
+                  className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide text-slate-500"
+                >
+                  NIT <span className="font-normal normal-case text-slate-600">(opcional)</span>
+                </label>
+                <input
+                  id="venta-cliente-nit"
+                  className={`${inp} w-[7.5rem] min-w-[7rem] font-mono sm:w-36`}
+                  value={clienteNit}
+                  onChange={(e) => setClienteNit(e.target.value)}
+                  placeholder="NIT"
+                  autoComplete="off"
+                />
+              </div>
+            </>
+          )}
         </div>
       </section>
 
@@ -1198,7 +1033,14 @@ export function NuevaVentaForm() {
             </button>
             <button
               type="submit"
-              disabled={submitting || !tipoCambio || lineas.length === 0 || !cajeroDestinoId.trim() || cajeros.length === 0}
+              disabled={
+                submitting ||
+                !tipoCambio ||
+                lineas.length === 0 ||
+                !cajeroDestinoId.trim() ||
+                cajeros.length === 0 ||
+                (esCredito && !clienteCredito)
+              }
               className="inline-flex min-w-[140px] items-center justify-center gap-2 rounded-xl bg-amber-500 py-2.5 pl-5 pr-6 text-sm font-semibold text-slate-950 shadow-lg shadow-amber-900/25 transition hover:bg-amber-400 disabled:pointer-events-none disabled:opacity-40"
             >
               {submitting ? (
@@ -1206,7 +1048,7 @@ export function NuevaVentaForm() {
               ) : (
                 <CheckCircle2 className="h-4 w-4" strokeWidth={2.5} />
               )}
-              Enviar a caja
+              {esCredito ? "Enviar a caja (crédito)" : "Enviar a caja"}
             </button>
           </div>
         </div>

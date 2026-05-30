@@ -3,7 +3,6 @@ import {
   cardexVentasProductoPorSucursalYPeriodo,
   comprasPorSucursalPorPeriodo,
   etiquetaPeriodo,
-  listStockBajo,
   parsePeriodoReporte,
   resumenComprasPorPeriodo,
   resumenVentasPorPeriodo,
@@ -84,23 +83,14 @@ export default async function AdminReportesPage({
       ? cardexVentasProductoPorSucursalYPeriodo(codigoCardex, sucursalFiltro, periodo, 300)
       : Promise.resolve(null);
 
-  const [
-    ventas,
-    compras,
-    porSucursalVentas,
-    porSucursalCompras,
-    topVendedores,
-    topProductos,
-    stockBajo,
-    cardexVentas,
-  ] = await Promise.all([
+  const [ventas, compras, porSucursalVentas, porSucursalCompras, topVendedores, topProductos, cardexVentas] =
+    await Promise.all([
     resumenVentasPorPeriodo(periodo, sucursalFiltro),
     resumenComprasPorPeriodo(periodo, sucursalFiltro),
     ventasPorSucursalPorPeriodo(periodo, sucursalFiltro),
     comprasPorSucursalPorPeriodo(periodo, sucursalFiltro),
     topVendedoresPorPeriodo(periodo, sucursalFiltro, 15),
-    topProductosPorPeriodo(periodo, sucursalFiltro, 15),
-    listStockBajo(5, 40),
+    topProductosPorPeriodo(periodo, sucursalFiltro, 10),
     cardexPromise,
   ]);
 
@@ -120,7 +110,7 @@ export default async function AdminReportesPage({
       title="Reportes"
       description={`${etiquetaPeriodo(periodo)} · ventas y compras confirmadas${
         nombreSucursalActiva ? ` · sucursal: ${nombreSucursalActiva}` : " · todas las sucursales"
-      }. Cardex: código + sucursal. Stock bajo: unidades ≤ 5 (global).`}
+      }. Cardex: código + sucursal.`}
     >
       <div className="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-end sm:justify-between">
         <div className="flex flex-wrap gap-2">
@@ -401,39 +391,6 @@ export default async function AdminReportesPage({
                   <td className="px-4 py-3 text-white">{r.sucursal}</td>
                   <td className="px-4 py-3 text-slate-300">{r.compras}</td>
                   <td className="px-4 py-3 font-mono text-slate-200">{r.total_bs}</td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      <h2 className="mt-10 text-sm font-semibold text-white">Stock bajo (≤ 5)</h2>
-      <p className="mt-1 text-xs text-slate-500">Global por sucursal (no depende del período arriba).</p>
-      <div className="mt-3 overflow-x-auto rounded-2xl border border-white/10 bg-slate-900/40">
-        <table className="w-full min-w-[560px] text-left text-sm">
-          <thead className="border-b border-white/10 bg-black/20 text-xs uppercase text-slate-500">
-            <tr>
-              <th className="px-4 py-3">Sucursal</th>
-              <th className="px-4 py-3">Producto</th>
-              <th className="px-4 py-3">Código</th>
-              <th className="px-4 py-3">Stock</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-white/5">
-            {stockBajo.length === 0 ? (
-              <tr>
-                <td className="px-4 py-6 text-slate-500" colSpan={4}>
-                  No hay ítems con stock ≤ 5 en sucursales activas.
-                </td>
-              </tr>
-            ) : (
-              stockBajo.map((r, i) => (
-                <tr key={`${r.codigo}-${r.sucursal}-${i}`} className="hover:bg-white/[0.02]">
-                  <td className="px-4 py-3 text-slate-300">{r.sucursal}</td>
-                  <td className="max-w-[200px] truncate px-4 py-3 text-white">{r.producto}</td>
-                  <td className="px-4 py-3 font-mono text-slate-400">{r.codigo}</td>
-                  <td className="px-4 py-3 text-amber-300">{r.stock}</td>
                 </tr>
               ))
             )}

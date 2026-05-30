@@ -2,7 +2,8 @@ import "server-only";
 
 import { labelDetalleProductoCodigoNombre } from "@/lib/caja/detalle-producto-label";
 import { pool } from "@/lib/db";
-import { formatDateTimeMysqlBolivia } from "@/lib/fecha-bolivia";
+import { formatDateTimeMysqlBolivia, ventasRangoFechaSql } from "@/lib/fecha-bolivia";
+import { withBoliviaMysqlSession } from "@/lib/mysql-bolivia-session";
 import type { ResultSetHeader, RowDataPacket } from "mysql2";
 import type { PoolConnection } from "mysql2/promise";
 
@@ -433,8 +434,10 @@ export async function listVentasProductosDiaSucursal(
   if (!/^\d{4}-\d{2}-\d{2}$/.test(f)) return [];
 
   const lim = Math.min(Math.max(1, Math.trunc(limitRows)), 8000);
-  const [rows] = await pool.execute<RowDataPacket[]>(
-    `SELECT p.id AS producto_id,
+  const rango = ventasRangoFechaSql(f, f);
+  const [rows] = await withBoliviaMysqlSession((conn) =>
+    conn.execute<RowDataPacket[]>(
+      `SELECT p.id AS producto_id,
             COALESCE(
               NULLIF(TRIM(p.qr_payload), ''),
               NULLIF(TRIM(p.codigo_pieza), ''),
@@ -451,11 +454,12 @@ export async function listVentasProductosDiaSucursal(
      WHERE v.sucursal_id = ?
        AND v.estado = 'confirmada'
        AND v.estado_cobro = 'cobrado'
-       AND DATE(v.fecha) = ?
+       ${rango.clause}
      GROUP BY p.id, codigo, medida, nombre
      ORDER BY nombre ASC, codigo ASC, p.id ASC
      LIMIT ${lim}`,
-    [sucursalId, f]
+      [sucursalId, ...rango.params]
+    )
   );
 
   return (rows as RowDataPacket[]).map((r) => ({
@@ -468,7 +472,7 @@ export async function listVentasProductosDiaSucursal(
   }));
 }
 
-/** Total Bs de ventas confirmadas de la sucursal en un día (calendario). */
+/** Total Bs de ventas confirmadas y cobradas de la sucursal en un día (calendario Bolivia). */
 export async function totalVentasConfirmadasDiaBs(
   sucursalId: number,
   fecha: string
@@ -477,16 +481,81 @@ export async function totalVentasConfirmadasDiaBs(
   const f = fecha.trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(f)) return 0;
 
-  const [rows] = await pool.execute<RowDataPacket[]>(
-    `SELECT COALESCE(SUM(v.total_bs), 0) AS total_bs
+  const rango = ventasRangoFechaSql(f, f);
+  const [rows] = await withBoliviaMysqlSession((conn) =>
+    conn.execute<RowDataPacket[]>(
+      `SELECT COALESCE(SUM(v.total_bs), 0) AS total_bs
      FROM ventas v
      WHERE v.sucursal_id = ?
        AND v.estado = 'confirmada'
        AND v.estado_cobro = 'cobrado'
-       AND DATE(v.fecha) = ?`,
-    [sucursalId, f]
+       ${rango.clause}`,
+      [sucursalId, ...rango.params]
+    )
   );
   return round2(Number((rows[0] as RowDataPacket | undefined)?.total_bs ?? 0));
+}
+
+/** Suma de líneas de detalle (cobradas) del día; debe coincidir con el total de documentos. */
+export async function totalVentasDetalleCobradasDiaBs(
+  sucursalId: number,
+  fecha: string
+): Promise<number> {
+  if (!Number.isFinite(sucursalId) || sucursalId < 1) return 0;
+  const f = fecha.trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(f)) return 0;
+
+  const rango = ventasRangoFechaSql(f, f);
+  const [rows] = await withBoliviaMysqlSession((conn) =>
+    conn.execute<RowDataPacket[]>(
+      `SELECT COALESCE(SUM(d.total_linea_bs), 0) AS total_bs
+     FROM venta_detalle d
+     INNER JOIN ventas v ON v.id = d.venta_id
+     WHERE v.sucursal_id = ?
+       AND v.estado = 'confirmada'
+       AND v.estado_cobro = 'cobrado'
+       ${rango.clause}`,
+      [sucursalId, ...rango.params]
+    )
+  );
+  return round2(Number((rows[0] as RowDataPacket | undefined)?.total_bs ?? 0));
+}
+
+/** Cantidad de documentos de venta cobrados en el día. */
+export async function countVentasCobradasDiaSucursal(
+  sucursalId: number,
+  fecha: string
+): Promise<number> {
+  if (!Number.isFinite(sucursalId) || sucursalId < 1) return 0;
+  const f = fecha.trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(f)) return 0;
+
+  const rango = ventasRangoFechaSql(f, f);
+  const [rows] = await withBoliviaMysqlSession((conn) =>
+    conn.execute<RowDataPacket[]>(
+      `SELECT COUNT(*) AS n
+     FROM ventas v
+     WHERE v.sucursal_id = ?
+       AND v.estado = 'confirmada'
+       AND v.estado_cobro = 'cobrado'
+       ${rango.clause}`,
+      [sucursalId, ...rango.params]
+    )
+  );
+  return Number((rows[0] as RowDataPacket | undefined)?.n ?? 0);
+}
+
+/** Total Bs del día: documentos de venta; si no cuadra con el detalle, usa la suma de líneas. */
+export async function totalVentasCobradasDiaBsReconciliado(
+  sucursalId: number,
+  fecha: string
+): Promise<number> {
+  const [porVentas, porDetalle] = await Promise.all([
+    totalVentasConfirmadasDiaBs(sucursalId, fecha),
+    totalVentasDetalleCobradasDiaBs(sucursalId, fecha),
+  ]);
+  if (porDetalle > porVentas + 0.01) return porDetalle;
+  return porVentas;
 }
 
 /** Número de documento para el reporte del día (referencia estable). */

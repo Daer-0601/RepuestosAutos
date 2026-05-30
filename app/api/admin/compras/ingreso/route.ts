@@ -170,6 +170,7 @@ export async function POST(request: Request) {
   }
 
   revalidatePath("/admin/importacion");
+  revalidatePath("/admin/compras");
   revalidatePath("/admin/productos");
   revalidatePath("/admin/reportes");
 

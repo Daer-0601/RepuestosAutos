@@ -20,9 +20,9 @@ const nav = [
   { href: "/vendedor", label: "Inicio", icon: LayoutDashboard, exact: true },
   { href: "/vendedor/ventas/nueva", label: "Nueva venta", icon: PlusCircle, exact: true },
   { href: "/vendedor/ventas", label: "Historial ventas", icon: ScrollText, exact: true },
+  { href: "/vendedor/creditos", label: "Historial créditos", icon: CreditCard, exact: false },
   { href: "/vendedor/clientes", label: "Clientes", icon: Users, exact: false },
   { href: "/vendedor/cotizaciones", label: "Cotizaciones", icon: FileText, exact: true },
-  { href: "/vendedor/creditos", label: "Créditos", icon: CreditCard, exact: true },
 ] as const;
 
 function NavLink({

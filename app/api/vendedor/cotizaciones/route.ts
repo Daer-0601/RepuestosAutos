@@ -21,6 +21,7 @@ export async function GET() {
   }
   const cajeros = await listCajerosActivosPorSucursal(ctx.sucursalId);
   return NextResponse.json({
+    sucursalId: ctx.sucursalId,
     tipoCambio: ultimo ? { id: ultimo.id, valor_bs_por_usd: ultimo.valor_bs_por_usd } : null,
     cotizaciones,
     sucursalNombre: ctx.sucursalNombre,

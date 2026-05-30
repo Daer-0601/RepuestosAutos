@@ -44,6 +44,8 @@ export function VentaCatalogoTabla({
   loading,
   sinConsulta,
   onAgregar,
+  /** Cotizaciones: se puede agregar aunque no haya stock en la sucursal. */
+  permitirSinStock = false,
 }: {
   miSucursalId: number;
   sucursales: { id: number; nombre: string }[];
@@ -52,6 +54,7 @@ export function VentaCatalogoTabla({
   /** true = todavía no se pulsó «Buscar» */
   sinConsulta: boolean;
   onAgregar: (row: VentaCatalogoApiRow) => void;
+  permitirSinStock?: boolean;
 }) {
   const nSuc = sucursales.length;
   const nCols = FIXED_COLS + nSuc + 2;
@@ -218,7 +221,13 @@ export function VentaCatalogoTabla({
                   className={`${cellPad} relative select-none text-center font-medium normal-case leading-tight text-slate-300 ${
                     s.id === miSucursalId ? "bg-amber-500/10 text-amber-100/95" : ""
                   }`}
-                  title={s.id === miSucursalId ? "Tu sucursal (solo acá podés descontar stock)" : s.nombre}
+                  title={
+                    s.id === miSucursalId
+                      ? permitirSinStock
+                        ? "Tu sucursal (solo referencia en cotización)"
+                        : "Tu sucursal (solo acá podés descontar stock)"
+                      : s.nombre
+                  }
                 >
                   <span className="line-clamp-3 break-words">{s.nombre}</span>
                   {resizeHandle(i, s.nombre)}
@@ -245,7 +254,9 @@ export function VentaCatalogoTabla({
           ) : sinConsulta ? (
             <tr>
               <td colSpan={colSpan} className="px-4 py-10 text-center text-sm text-slate-500">
-                Elegí filtros y pulsá «Buscar» para ver productos, precios y stock por sucursal.
+                {permitirSinStock
+                  ? "Elegí filtros y pulsá «Buscar» para ver productos, precios y stock (solo referencia)."
+                  : "Elegí filtros y pulsá «Buscar» para ver productos, precios y stock por sucursal."}
               </td>
             </tr>
           ) : rows.length === 0 ? (
@@ -257,8 +268,8 @@ export function VentaCatalogoTabla({
           ) : (
             rows.map((r, idx) => {
               const mi = stockMi(r, miSucursalId);
-              const puede = mi > 0;
-              const tone = filaTone(r, miSucursalId);
+              const puede = permitirSinStock || mi > 0;
+              const tone = permitirSinStock ? "bg-slate-950/30 text-slate-200" : filaTone(r, miSucursalId);
               const stripe = idx % 2 === 0 ? "" : "brightness-[0.98]";
               const img0 = r.imagenes_urls?.[0] ?? "";
               const qrPayload = (r.qr_payload ?? "").trim() || r.codigo;
@@ -345,9 +356,11 @@ export function VentaCatalogoTabla({
                       type="button"
                       disabled={!puede}
                       title={
-                        puede
-                          ? "Agregar al carrito (stock en tu sucursal)"
-                          : "Sin stock en tu sucursal; pedí traspaso o venda desde la sucursal que tenga."
+                        permitirSinStock
+                          ? "Agregar a la cotización (el stock no limita el presupuesto)"
+                          : puede
+                            ? "Agregar al carrito (stock en tu sucursal)"
+                            : "Sin stock en tu sucursal; pedí traspaso o venda desde la sucursal que tenga."
                       }
                       onClick={() => onAgregar(r)}
                       className="inline-flex items-center gap-1 rounded-lg border border-amber-500/35 bg-amber-500/15 px-2.5 py-1 text-[11px] font-medium text-amber-100 transition hover:bg-amber-500/25 disabled:cursor-not-allowed disabled:opacity-35"

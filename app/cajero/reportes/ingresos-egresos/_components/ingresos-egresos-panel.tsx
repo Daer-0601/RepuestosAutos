@@ -1,7 +1,11 @@
 "use client";
 
 import { CajaMovimientoForm } from "@/app/cajero/reportes/ingresos-egresos/_components/caja-movimiento-form";
-import { labelDetalleProductoCodigoNombre } from "@/lib/caja/detalle-producto-label";
+import {
+  fmtCantidadVendida,
+  labelDetalleProductoCodigoNombre,
+  labelDetalleProductoConCantidad,
+} from "@/lib/caja/detalle-producto-label";
 import { formatoMostrarFechaBo, formatoMostrarFechaHoraBo } from "@/lib/fecha-bolivia";
 import { Loader2, Printer, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -36,7 +40,15 @@ type ReporteData = {
   movimientos: Movimiento[];
   ventasProductos: VentaProductoDia[];
   ventaTotalBs: number;
+  cantidadVentasCobradas: number;
 };
+
+function ventaTotalDelDia(data: ReporteData | null): number {
+  const sistema = round2(data?.ventaTotalBs ?? 0);
+  const sumProd = round2((data?.ventasProductos ?? []).reduce((s, p) => s + p.totalBs, 0));
+  if (sistema > 0) return sistema;
+  return sumProd;
+}
 
 type CajaSolicitud = {
   id: number;
@@ -58,7 +70,12 @@ type CajaSolicitud = {
 };
 
 function labelDetalleVentaProducto(p: VentaProductoDia): string {
-  return labelDetalleProductoCodigoNombre(p.codigo, p.nombre);
+  return labelDetalleProductoConCantidad(p.codigo, p.nombre, p.cantidad);
+}
+
+function celdaCantidadVentaProducto(p: VentaProductoDia): string {
+  const cant = fmtCantidadVendida(p.cantidad);
+  return cant || "—";
 }
 
 function round2(n: number) {
@@ -195,7 +212,6 @@ function buildReporteHtml(data: ReporteData): string {
   for (const p of ventas) {
     const ing = round2(p.totalBs);
     if (ing <= 0) continue;
-    totalIngreso = round2(totalIngreso + ing);
     const sub = ing;
     filasMov.push(`<tr class="venta-linea">
       <td class="det">${escHtml(labelDetalleVentaProducto(p))}</td>
@@ -206,26 +222,15 @@ function buildReporteHtml(data: ReporteData): string {
     </tr>`);
   }
 
-  const venta = round2(data.ventaTotalBs);
+  const venta = ventaTotalDelDia(data);
   if (venta > 0) {
-    if (ventas.length === 0) {
-      totalIngreso = round2(totalIngreso + venta);
-    }
+    totalIngreso = round2(totalIngreso + venta);
     filasMov.push(`<tr class="venta-total">
       <td class="det"><strong>VENTA TOTAL</strong></td>
       <td class="cd"><span class="chk"></span></td>
       <td class="num">${fmtBs(venta)}</td>
       <td class="num">0.00</td>
       <td class="num sub">${fmtBs(venta)}</td>
-    </tr>`);
-  } else if (ventas.length > 0) {
-    const sumProd = round2(ventas.reduce((s, p) => s + p.totalBs, 0));
-    filasMov.push(`<tr class="venta-total">
-      <td class="det"><strong>VENTA TOTAL</strong></td>
-      <td class="cd"><span class="chk"></span></td>
-      <td class="num">${fmtBs(sumProd)}</td>
-      <td class="num">0.00</td>
-      <td class="num sub">${fmtBs(sumProd)}</td>
     </tr>`);
   }
 
@@ -345,7 +350,7 @@ export function IngresosEgresosPanel({ fecha }: { fecha: string }) {
     setLoading(true);
     setErr(null);
     try {
-      const q = new URLSearchParams({ fecha: fecha.trim() });
+      const q = new URLSearchParams({ fecha: fecha.trim(), _t: String(Date.now()) });
       const res = await fetch(`/api/cajero/caja-movimientos?${q}`, { cache: "no-store" });
       const json = (await res.json()) as ReporteData & {
         error?: string;
@@ -369,6 +374,9 @@ export function IngresosEgresosPanel({ fecha }: { fecha: string }) {
         movimientos: Array.isArray(json.movimientos) ? json.movimientos : [],
         ventasProductos: Array.isArray(json.ventasProductos) ? json.ventasProductos : [],
         ventaTotalBs: Number(json.ventaTotalBs ?? 0),
+        cantidadVentasCobradas: Number(
+          (json as { cantidadVentasCobradas?: number }).cantidadVentasCobradas ?? 0
+        ),
       });
 
       try {
@@ -401,7 +409,7 @@ export function IngresosEgresosPanel({ fecha }: { fecha: string }) {
       else egr = round2(egr + m.montoBs);
       if (m.esCompraDolar && m.montoUsd != null) totalCDolar = round2(totalCDolar + m.montoUsd);
     }
-    const venta = round2(data?.ventaTotalBs ?? 0);
+    const venta = ventaTotalDelDia(data);
     ing = round2(ing + venta);
     return {
       ing,
@@ -598,10 +606,11 @@ export function IngresosEgresosPanel({ fecha }: { fecha: string }) {
       ) : (
         <>
           <div className="overflow-x-auto rounded-xl border border-white/10">
-            <table className="w-full min-w-[520px] text-left text-sm">
+            <table className="w-full min-w-[560px] text-left text-sm">
               <thead>
                 <tr className="border-b border-white/10 bg-white/[0.04] text-xs uppercase tracking-wide text-slate-400">
                   <th className="px-3 py-2">Detalle</th>
+                  <th className="w-16 px-2 py-2 text-right">Cant.</th>
                   <th className="px-3 py-2">Tipo</th>
                   <th className="px-3 py-2 text-right">Monto Bs</th>
                   <th className="px-3 py-2 text-right">C$ (USD)</th>
@@ -611,7 +620,7 @@ export function IngresosEgresosPanel({ fecha }: { fecha: string }) {
                 {(data?.movimientos ?? []).length === 0 &&
                 (data?.ventasProductos ?? []).length === 0 ? (
                   <tr>
-                    <td colSpan={4} className="px-3 py-6 text-center text-slate-500">
+                    <td colSpan={5} className="px-3 py-6 text-center text-slate-500">
                       Sin movimientos ni ventas confirmadas para este día.
                     </td>
                   </tr>
@@ -619,6 +628,7 @@ export function IngresosEgresosPanel({ fecha }: { fecha: string }) {
                 {(data?.movimientos ?? []).map((m) => (
                     <tr key={m.id} className="border-b border-white/5 text-slate-200">
                       <td className="px-3 py-2">{m.detalle}</td>
+                      <td className="px-2 py-2 text-right font-mono text-xs tabular-nums text-slate-500">—</td>
                       <td className="px-3 py-2 capitalize">
                         <span
                           className={
@@ -645,10 +655,18 @@ export function IngresosEgresosPanel({ fecha }: { fecha: string }) {
                   <>
                     <tr className="border-t border-white/10 bg-white/[0.02]">
                       <td
-                        colSpan={4}
+                        colSpan={5}
                         className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-400/90"
                       >
-                        Ventas confirmadas del día
+                        Ventas cobradas del día
+                        {data && data.cantidadVentasCobradas > 0 ? (
+                          <span className="ml-1 font-normal normal-case text-slate-500">
+                            ({data.cantidadVentasCobradas}{" "}
+                            {data.cantidadVentasCobradas === 1 ? "venta" : "ventas"} ·{" "}
+                            {(data.ventasProductos ?? []).length}{" "}
+                            {(data.ventasProductos ?? []).length === 1 ? "producto" : "productos"})
+                          </span>
+                        ) : null}
                       </td>
                     </tr>
                     {(data?.ventasProductos ?? []).map((p) => (
@@ -657,7 +675,10 @@ export function IngresosEgresosPanel({ fecha }: { fecha: string }) {
                         className="border-b border-white/5 text-emerald-50/90"
                       >
                         <td className="px-3 py-2 text-xs leading-snug">
-                          {labelDetalleVentaProducto(p)}
+                          {labelDetalleProductoCodigoNombre(p.codigo, p.nombre)}
+                        </td>
+                        <td className="px-2 py-2 text-right font-mono text-sm font-semibold tabular-nums text-emerald-200">
+                          {celdaCantidadVentaProducto(p)}
                         </td>
                         <td className="px-3 py-2 capitalize text-emerald-300/80">ingreso</td>
                         <td className="px-3 py-2 text-right font-mono tabular-nums text-emerald-100">
@@ -670,7 +691,8 @@ export function IngresosEgresosPanel({ fecha }: { fecha: string }) {
                 ) : null}
                 {resumen.venta > 0 ? (
                   <tr className="bg-emerald-500/10 font-medium text-emerald-100">
-                    <td className="px-3 py-2">VENTA TOTAL (sistema)</td>
+                    <td className="px-3 py-2">VENTA TOTAL (cobrado en el día)</td>
+                    <td className="px-2 py-2 text-right">—</td>
                     <td className="px-3 py-2">ingreso</td>
                     <td className="px-3 py-2 text-right font-mono tabular-nums">
                       {fmtBs(resumen.venta)}

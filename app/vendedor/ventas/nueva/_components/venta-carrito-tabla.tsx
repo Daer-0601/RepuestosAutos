@@ -61,6 +61,8 @@ export function VentaCarritoTabla({
   onPrecioChange,
   onPrecioBlur,
   onRemove,
+  /** Cotización: el stock es solo referencia, no limita cantidades. */
+  modoCotizacion = false,
 }: {
   lineas: VentaCarritoLinea[];
   inpPosClass: string;
@@ -70,6 +72,7 @@ export function VentaCarritoTabla({
   onPrecioChange: (key: string, value: string) => void;
   onPrecioBlur?: (key: string) => void;
   onRemove: (key: string) => void;
+  modoCotizacion?: boolean;
 }) {
   const [colWidths, setColWidths] = useState<number[]>(() => [...DEFAULT_COL_WIDTHS]);
   const resizeDragRef = useRef<{ index: number; startX: number; startWidth: number } | null>(null);
@@ -177,8 +180,9 @@ export function VentaCarritoTabla({
           {lineas.length === 0 ? (
             <tr>
               <td colSpan={nCols} className="px-4 py-12 text-center text-sm text-slate-500">
-                Todavía no hay repuestos en esta venta. Sumá el primero con el lector de arriba o desde el buscador de
-                catálogo.
+                {modoCotizacion
+                  ? "Todavía no hay líneas en esta cotización. Sumá productos con el lector o el buscador (no importa el stock)."
+                  : "Todavía no hay repuestos en esta venta. Sumá el primero con el lector de arriba o desde el buscador de catálogo."}
               </td>
             </tr>
           ) : (

@@ -1,8 +1,13 @@
 import "server-only";
 
+import { ensureCreditosSchema } from "@/lib/data/creditos";
 import { pool } from "@/lib/db";
+import {
+  listVentasDetalleProductosPorIds,
+  type VentaDetalleProductoRow,
+  type TipoPagoVenta,
+} from "@/lib/data/ventas-vendedor";
 import { MYSQL_SESSION_OFFSET, formatDateTimeMysqlBolivia } from "@/lib/fecha-bolivia";
-import type { TipoPagoVenta } from "@/lib/data/ventas-vendedor";
 import type { RowDataPacket } from "mysql2";
 
 let ventasCobroColumnsReady = false;
@@ -48,12 +53,15 @@ export type VentaPendienteCobroRow = {
   id: number;
   fecha: string;
   totalBs: number;
+  tipoPago: TipoPagoVenta;
   clienteNombre: string | null;
   clienteNit: string | null;
   vendedorNombre: string;
   vendedorUsername: string;
   cajeroAsignadoNombre: string | null;
   cantidadItems: number;
+  /** Crédito ya entregado (existe fila en `creditos`). */
+  creditoEntregado: boolean;
 };
 
 /** Todas las ventas pendientes de cobro de la sucursal (sin filtrar por cajero destino). */
@@ -62,6 +70,7 @@ export async function listVentasPendientesCobroSucursal(
   opts?: { fechaDesde?: string | null; fechaHasta?: string | null }
 ): Promise<VentaPendienteCobroRow[]> {
   await ensureVentasCobroCajaColumns();
+  await ensureCreditosSchema();
   if (!Number.isFinite(sucursalId) || sucursalId < 1) return [];
 
   const conn = await pool.getConnection();
@@ -81,17 +90,19 @@ export async function listVentasPendientesCobroSucursal(
     }
 
     const [rows] = await conn.execute<RowDataPacket[]>(
-      `SELECT v.id, v.fecha, v.total_bs,
+      `SELECT v.id, v.fecha, v.total_bs, v.tipo_pago,
               COALESCE(NULLIF(TRIM(c.nombre), ''), NULLIF(TRIM(v.cliente_nombre_libre), '')) AS cliente_nombre,
               NULLIF(TRIM(v.cliente_nit), '') AS cliente_nit,
               u.nombre_completo AS vendedor_nombre,
               u.username AS vendedor_username,
               COALESCE(NULLIF(TRIM(uc.nombre_completo), ''), NULLIF(TRIM(uc.username), '')) AS cajero_asignado,
-              COALESCE(det.n_items, 0) AS n_items
+              COALESCE(det.n_items, 0) AS n_items,
+              (cr.id IS NOT NULL) AS credito_entregado
        FROM ventas v
        INNER JOIN usuarios u ON u.id = v.usuario_id
        LEFT JOIN clientes c ON c.id = v.cliente_id
        LEFT JOIN usuarios uc ON uc.id = v.cajero_destino_usuario_id
+       LEFT JOIN creditos cr ON cr.venta_id = v.id
        LEFT JOIN (
          SELECT venta_id, COUNT(*) AS n_items
          FROM venta_detalle
@@ -100,6 +111,7 @@ export async function listVentasPendientesCobroSucursal(
        WHERE v.sucursal_id = ?
          AND v.estado = 'confirmada'
          AND v.estado_cobro = 'pendiente'
+         AND (v.tipo_pago != 'credito' OR cr.id IS NULL)
          ${dateClause}
        ORDER BY v.fecha ASC, v.id ASC`,
       params
@@ -109,6 +121,8 @@ export async function listVentasPendientesCobroSucursal(
       id: Number(r.id),
       fecha: r.fecha instanceof Date ? formatDateTimeMysqlBolivia(r.fecha) : String(r.fecha ?? ""),
       totalBs: Number(r.total_bs ?? 0),
+      tipoPago: String(r.tipo_pago ?? "efectivo") as TipoPagoVenta,
+      creditoEntregado: Boolean(r.credito_entregado),
       clienteNombre:
         r.cliente_nombre != null && String(r.cliente_nombre).trim() !== "" ? String(r.cliente_nombre) : null,
       clienteNit: r.cliente_nit != null && String(r.cliente_nit).trim() !== "" ? String(r.cliente_nit) : null,
@@ -132,24 +146,17 @@ export async function listVentasPendientesCobroCajero(
   return listVentasPendientesCobroSucursal(sucursalId, opts);
 }
 
-export type VentaDetalleCobroLinea = {
-  productoId: number;
-  codigo: string;
-  nombre: string;
-  medida: string | null;
-  cantidad: number;
-  precioUnitarioBs: number;
-  totalLineaBs: number;
-};
+export type VentaDetalleCobroLinea = VentaDetalleProductoRow;
 
 export type VentaDetalleCobro = {
   id: number;
   fecha: string;
   totalBs: number;
+  tipoPago: TipoPagoVenta;
   clienteNombre: string | null;
   clienteNit: string | null;
   vendedorNombre: string;
-  lineas: VentaDetalleCobroLinea[];
+  lineas: VentaDetalleProductoRow[];
 };
 
 export async function getVentaPendienteCobroDetalle(
@@ -160,7 +167,7 @@ export async function getVentaPendienteCobroDetalle(
   if (!Number.isFinite(ventaId) || ventaId < 1) return null;
 
   const [vrows] = await pool.execute<RowDataPacket[]>(
-    `SELECT v.id, v.fecha, v.total_bs,
+    `SELECT v.id, v.fecha, v.total_bs, v.tipo_pago,
             COALESCE(NULLIF(TRIM(c.nombre), ''), NULLIF(TRIM(v.cliente_nombre_libre), '')) AS cliente_nombre,
             NULLIF(TRIM(v.cliente_nit), '') AS cliente_nit,
             u.nombre_completo AS vendedor_nombre
@@ -177,34 +184,17 @@ export async function getVentaPendienteCobroDetalle(
   const v = vrows[0] as RowDataPacket | undefined;
   if (!v) return null;
 
-  const [lrows] = await pool.execute<RowDataPacket[]>(
-    `SELECT d.producto_id, d.cantidad, d.precio_unitario_bs, d.total_linea_bs,
-            COALESCE(NULLIF(TRIM(p.codigo), ''), '—') AS codigo,
-            COALESCE(NULLIF(TRIM(p.nombre), ''), '—') AS nombre,
-            NULLIF(TRIM(p.medida), '') AS medida
-     FROM venta_detalle d
-     INNER JOIN productos p ON p.id = d.producto_id
-     WHERE d.venta_id = ?
-     ORDER BY d.id ASC`,
-    [ventaId]
-  );
+  const lineas = await listVentasDetalleProductosPorIds([ventaId]);
 
   return {
     id: Number(v.id),
     fecha: v.fecha instanceof Date ? formatDateTimeMysqlBolivia(v.fecha) : String(v.fecha ?? ""),
     totalBs: Number(v.total_bs ?? 0),
+    tipoPago: String(v.tipo_pago ?? "efectivo") as TipoPagoVenta,
     clienteNombre: v.cliente_nombre != null && String(v.cliente_nombre).trim() !== "" ? String(v.cliente_nombre) : null,
     clienteNit: v.cliente_nit != null && String(v.cliente_nit).trim() !== "" ? String(v.cliente_nit) : null,
     vendedorNombre: String(v.vendedor_nombre ?? "").trim() || "—",
-    lineas: (lrows as RowDataPacket[]).map((r) => ({
-      productoId: Number(r.producto_id),
-      codigo: String(r.codigo ?? "—"),
-      nombre: String(r.nombre ?? "—"),
-      medida: r.medida != null && String(r.medida).trim() !== "" ? String(r.medida) : null,
-      cantidad: Number(r.cantidad ?? 0),
-      precioUnitarioBs: Number(r.precio_unitario_bs ?? 0),
-      totalLineaBs: Number(r.total_linea_bs ?? 0),
-    })),
+    lineas,
   };
 }
 
@@ -227,6 +217,17 @@ export async function registrarCobroVentaCajero(input: {
   await ensureVentasCobroCajaColumns();
   if (!isTipoPagoCaja(input.tipoPago)) {
     return { ok: false, message: "Forma de pago inválida." };
+  }
+
+  const [chkTipo] = await pool.execute<RowDataPacket[]>(
+    `SELECT tipo_pago FROM ventas WHERE id = ? AND sucursal_id = ? LIMIT 1`,
+    [input.ventaId, input.sucursalId]
+  );
+  if (String((chkTipo[0] as RowDataPacket | undefined)?.tipo_pago ?? "") === "credito") {
+    return {
+      ok: false,
+      message: "Esta venta es a crédito. Confirmá la entrega o cobrá el crédito en el módulo Créditos.",
+    };
   }
 
   const fechaCobro = formatDateTimeMysqlBolivia(new Date());

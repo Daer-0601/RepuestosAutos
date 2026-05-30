@@ -3,6 +3,7 @@
 import { ProductoQrImagenesControls } from "@/app/admin/productos/_components/producto-qr-imagenes-controls";
 import type { SucursalRow } from "@/lib/data/sucursales";
 import type { ProductoCatalogoRowConStock } from "@/lib/data/productos-catalogo";
+import { ShoppingCart } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -29,9 +30,20 @@ function filaPorStock(stockTotal: number): { tr: string; mono: string } {
 export function ProductosCatalogoTabla({
   rows,
   sucursales,
+  modoAccion = "editar",
+  sucursalReferenciaId = null,
+  onAgregar,
+  idsEnCarrito,
 }: {
   rows: ProductoCatalogoRowConStock[];
   sucursales: SucursalRow[];
+  /** En traspasos u otros pickers: botón agregar en lugar de enlace Editar. */
+  modoAccion?: "editar" | "agregar";
+  /** Resalta la columna de stock de esta sucursal (p. ej. origen del traspaso). */
+  sucursalReferenciaId?: number | null;
+  onAgregar?: (row: ProductoCatalogoRowConStock) => void;
+  /** Productos ya cargados en el traspaso (deshabilita agregar duplicado). */
+  idsEnCarrito?: ReadonlySet<number>;
 }) {
   const [colWidths, setColWidths] = useState<number[]>(() => defaultColWidths(sucursales.length));
   const resizeDragRef = useRef<{ index: number; startX: number; startWidth: number } | null>(null);
@@ -153,13 +165,15 @@ export function ProductosCatalogoTabla({
               const isSuc = i >= idxSucStart && i < idxSucStart + nSuc;
               const isAccion = i === idxAccion;
               const sucursalCol = isSuc ? sucursales[i - idxSucStart] : null;
+              const esSucRef =
+                isSuc && sucursalCol != null && sucursalReferenciaId != null && sucursalCol.id === sucursalReferenciaId;
               const thTitle = isSuc
-                ? `${sucursalCol?.nombre ?? label} · arrastrá el borde derecho (aquí o en la tabla)`
+                ? `${sucursalCol?.nombre ?? label}${esSucRef ? " (sucursal origen)" : ""} · arrastrá el borde derecho`
                 : "Arrastrá el borde derecho de la columna (encabezado o celdas)";
               return (
                 <th
                   key={isSuc && sucursalCol ? `suc-${sucursalCol.id}` : `col-${i}`}
-                  className={`${cellPad} ${cellBorderR} relative select-none ${isSuc || i === idxStockTotal ? "text-center" : ""} ${isAccion ? "text-right" : ""} ${isSuc ? "align-bottom font-medium normal-case text-slate-300" : ""}`}
+                  className={`${cellPad} ${cellBorderR} relative select-none ${isSuc || i === idxStockTotal ? "text-center" : ""} ${isAccion ? "text-right" : ""} ${isSuc ? "align-bottom font-medium normal-case text-slate-300" : ""} ${esSucRef ? "bg-sky-500/15 text-sky-100" : ""}`}
                   title={thTitle}
                 >
                   <span
@@ -290,8 +304,13 @@ export function ProductosCatalogoTabla({
                   {sucursales.map((s, si) => {
                     const q = r.stocksPorSucursal.get(s.id) ?? 0;
                     const colI = idxSucStart + si;
+                    const esSucRef =
+                      sucursalReferenciaId != null && s.id === sucursalReferenciaId;
                     return (
-                      <td key={s.id} className={`${cellPad} ${cellBorderR} relative text-center font-mono ${tone.mono}`}>
+                      <td
+                        key={s.id}
+                        className={`${cellPad} ${cellBorderR} relative text-center font-mono ${tone.mono} ${esSucRef ? "bg-sky-500/10 font-semibold" : ""}`}
+                      >
                         {q}
                         {resizeHandle(colI, labels[colI] ?? s.nombre)}
                       </td>
@@ -306,13 +325,45 @@ export function ProductosCatalogoTabla({
                     {resizeHandle(idxPtope, labels[idxPtope])}
                   </td>
                   <td className={`${cellPad} ${cellBorderR} relative text-right`}>
-                    <Link
-                      href={`/admin/productos/${r.id}`}
-                      className="font-medium text-sky-300 hover:text-sky-200 hover:underline"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      Editar
-                    </Link>
+                    {modoAccion === "agregar" && onAgregar ? (
+                      (() => {
+                        const stockRef =
+                          sucursalReferenciaId != null
+                            ? r.stocksPorSucursal.get(sucursalReferenciaId) ?? 0
+                            : r.stock_total;
+                        const yaEnLista = idsEnCarrito?.has(r.id) ?? false;
+                        const puede = stockRef > 0;
+                        return (
+                          <button
+                            type="button"
+                            disabled={!puede}
+                            title={
+                              stockRef < 1
+                                ? "Sin stock en la sucursal origen."
+                                : yaEnLista
+                                  ? "Sumar una unidad más al traspaso"
+                                  : "Agregar al traspaso"
+                            }
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (puede) onAgregar(r);
+                            }}
+                            className="inline-flex items-center gap-1 rounded-lg border border-sky-500/35 bg-sky-500/15 px-2.5 py-1 text-[11px] font-medium text-sky-100 transition hover:bg-sky-500/25 disabled:cursor-not-allowed disabled:opacity-35"
+                          >
+                            <ShoppingCart className="h-3.5 w-3.5" strokeWidth={2} />
+                            {yaEnLista ? "+1" : "Agregar"}
+                          </button>
+                        );
+                      })()
+                    ) : (
+                      <Link
+                        href={`/admin/productos/${r.id}`}
+                        className="font-medium text-sky-300 hover:text-sky-200 hover:underline"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        Editar
+                      </Link>
+                    )}
                     {resizeHandle(idxAccion, labels[idxAccion])}
                   </td>
                 </tr>

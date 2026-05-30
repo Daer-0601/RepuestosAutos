@@ -71,6 +71,23 @@ export function mysqlValueToIsoDateOnly(raw: unknown): string | null {
   return null;
 }
 
+/**
+ * Filtro inclusive por día calendario sobre `ventas.fecha` (DATETIME guardado en hora Bolivia).
+ * Usar con `SET time_zone = MYSQL_SESSION_OFFSET` en la misma conexión.
+ */
+export function ventasRangoFechaSql(
+  fechaDesde: string,
+  fechaHasta: string,
+  alias = "v"
+): { clause: string; params: [string, string] } {
+  const d1 = fechaDesde.trim();
+  const d2 = fechaHasta.trim();
+  return {
+    clause: `AND ${alias}.fecha >= ? AND ${alias}.fecha < DATE_ADD(?, INTERVAL 1 DAY)`,
+    params: [`${d1} 00:00:00`, `${d2} 00:00:00`],
+  };
+}
+
 /** Muestra una fecha `YYYY-MM-DD` en formato corto Bolivia. */
 export function formatIsoDateOnlyBo(iso: string): string {
   const p = parseIsoDateOnly(iso);

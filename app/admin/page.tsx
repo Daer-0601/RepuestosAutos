@@ -3,6 +3,7 @@ import {
   ArrowLeftRight,
   BarChart3,
   Building2,
+  ClipboardList,
   DollarSign,
   FileSpreadsheet,
   Package,
@@ -20,9 +21,16 @@ const modules = [
   {
     href: "/admin/importacion",
     title: "Ingreso / compra",
-    desc: "Compra a proveedor y stock por sucursal.",
+    desc: "Registrar compra e importar stock por sucursal.",
     icon: Upload,
     accent: "from-rose-500/20 to-rose-600/5 ring-rose-500/20 text-rose-200",
+  },
+  {
+    href: "/admin/compras",
+    title: "Listado compras",
+    desc: "Historial de todas las importaciones registradas.",
+    icon: ClipboardList,
+    accent: "from-rose-500/15 to-slate-700/10 ring-rose-500/15 text-rose-100",
   },
   {
     href: "/admin/reportes",

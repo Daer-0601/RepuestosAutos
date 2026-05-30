@@ -1,218 +1,94 @@
 "use client";
 
-import { rangoPrecioListaTopeBs } from "@/lib/venta-precio-lista-tope-range";
-import { Loader2, Plus, Search, Send, Trash2 } from "lucide-react";
+import {
+  VentaCarritoTabla,
+  type VentaCarritoLinea,
+  type VentaCarritoProducto,
+} from "@/app/vendedor/ventas/nueva/_components/venta-carrito-tabla";
+import { VentaCatalogoTabla } from "@/app/vendedor/ventas/nueva/_components/venta-catalogo-tabla";
+import { CATALOGO_FILAS_DEFAULT } from "@/lib/catalogo-productos-constants";
+import type { ModoCatalogoVenta, ProductoVentaCompletoRow, VentaCatalogoApiRow } from "@/lib/types/venta-vendedor-catalogo";
+import {
+  carritoProductoSinMetadatos,
+  clampPrecioUnitBsInput,
+  defaultPrecioUnitBsStr,
+  fusionarProductoCarrito,
+  mapCatalogRowToLookup,
+  mapCompletoToLookup,
+  nuevaLineaCarrito,
+  parsePrecioUnitBsExplicito,
+  parseQty,
+  precioUnitLineaEfectivo,
+  round2,
+  round4,
+  snapCantidadMinima,
+  snapPrecioUnitBsToRange,
+  subtotalLineaBs,
+} from "@/lib/vendedor/venta-carrito-helpers";
+import { validarPrecioVentaBs } from "@/lib/venta-precio-lista-tope-range";
+import {
+  ChevronDown,
+  ChevronUp,
+  Loader2,
+  Plus,
+  ScanLine,
+  Send,
+  ShoppingBag,
+} from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 const inp =
-  "w-full min-w-0 rounded-lg border border-white/10 bg-slate-950/80 px-3 py-2 text-sm text-white outline-none focus:border-amber-500/50";
-const inpNum = `${inp} font-mono`;
+  "w-full min-w-0 rounded border border-white/10 bg-slate-950/80 px-2 py-1.5 text-xs text-white outline-none placeholder:text-slate-600 focus:border-amber-500/40";
 
-/** Mismo estilo que admin / pedidos (búsqueda de catálogo). */
-const inpCatalogoBuscar =
-  "w-full min-w-0 rounded-lg border border-white/10 bg-slate-950/80 px-3 py-2 text-sm text-white outline-none focus:border-sky-500/50";
+const inpPos =
+  "w-full min-w-0 rounded border border-slate-600/80 bg-slate-950/90 px-1.5 py-1 text-[11px] text-slate-100 outline-none focus:border-amber-500/50";
 
-type ProductoCatalogoCot = {
-  id: number;
-  codigo: string;
-  codigo_pieza: string | null;
-  nombre: string;
-  medida: string | null;
-  marca_auto: string | null;
-  especificacion: string | null;
-  repuesto: string | null;
-  precio_venta_lista_bs: string | null;
-  precio_venta_lista_usd: string | null;
-  punto_tope: string | null;
-  stock_total: number;
-};
-
-type LineaCot = {
-  key: string;
-  productoId: number;
-  codigo: string;
-  codigoPieza: string | null;
-  medida: string | null;
-  nombre: string;
-  cantidad: string;
-  precioUnitBs: string;
-  precioListaBs: number | null;
-  puntoTope: number | null;
-};
-
-function nuevaLinea(p: ProductoCatalogoCot): LineaCot {
-  const lista = p.precio_venta_lista_bs != null && p.precio_venta_lista_bs !== "" ? Number(p.precio_venta_lista_bs) : null;
-  const tope = p.punto_tope != null && p.punto_tope !== "" ? Number(p.punto_tope) : null;
-  const listaOk = lista !== null && Number.isFinite(lista) && lista > 0 ? round2(lista) : null;
-  const topeOk = tope !== null && Number.isFinite(tope) && tope > 0 ? round2(tope) : null;
-  const precioIni = defaultPrecioUnitBsStr({ precio_venta_lista_bs: listaOk });
-  return {
-    key: typeof crypto !== "undefined" ? crypto.randomUUID() : String(Math.random()),
-    productoId: p.id,
-    codigo: p.codigo,
-    codigoPieza: p.codigo_pieza?.trim() ? p.codigo_pieza.trim() : null,
-    medida: p.medida?.trim() ? p.medida.trim() : null,
-    nombre: p.nombre,
-    cantidad: "1",
-    precioUnitBs: precioIni,
-    precioListaBs: listaOk,
-    puntoTope: topeOk,
-  };
-}
-
-function round2(n: number) {
-  return Math.round(n * 100) / 100;
-}
-
-function parseQty(s: string): number {
-  const n = Math.trunc(Number(s.replace(",", ".")));
-  return Number.isFinite(n) && n > 0 ? n : 0;
-}
-
-function parsePrecio(s: string, lista: number | null): number | null {
-  const t = s.trim();
-  if (!t) {
-    return lista !== null && lista > 0 ? round2(lista) : null;
-  }
-  const n = Number(t.replace(",", "."));
-  return Number.isFinite(n) && n > 0 ? round2(n) : null;
-}
-
-/** Solo dígitos y un separador decimal (coma o punto → un solo punto). */
-function sanitizePrecioUnitBsDigitos(raw: string): string {
-  const s = raw.replace(/,/g, ".");
-  let out = "";
-  let dot = false;
-  for (const ch of s) {
-    if (ch >= "0" && ch <= "9") {
-      out += ch;
-      continue;
-    }
-    if (ch === "." && !dot) {
-      out += ".";
-      dot = true;
-    }
-  }
-  return out;
-}
-
-/** Igual que nueva venta: intervalo entre lista y tope, o solo uno si falta el otro. */
-function precioUnitBsBounds(lista: number | null, tope: number | null): { lo: number | null; hi: number | null } {
-  const interval = rangoPrecioListaTopeBs(lista, tope);
-  if (interval) {
-    return { lo: round2(interval.lo), hi: round2(interval.hi) };
-  }
-  const listaOk = lista != null && Number.isFinite(lista) && lista > 0 ? round2(lista) : null;
-  const topeOk = tope != null && Number.isFinite(tope) && tope > 0 ? round2(tope) : null;
-  if (listaOk != null) return { lo: listaOk, hi: null };
-  if (topeOk != null) return { lo: null, hi: topeOk };
-  return { lo: null, hi: null };
-}
-
-function precioUnitLineaEfectivo(ln: LineaCot): number | null {
-  const p = parsePrecio(ln.precioUnitBs, ln.precioListaBs);
-  if (p === null) return null;
-  const { lo, hi } = precioUnitBsBounds(ln.precioListaBs, ln.puntoTope);
-  let v = p;
-  if (hi != null) v = Math.min(v, hi);
-  if (lo != null) v = Math.max(v, lo);
-  return v;
-}
-
-function defaultPrecioUnitBsStr(p: { precio_venta_lista_bs: number | null }): string {
-  const lista = p.precio_venta_lista_bs;
-  if (lista != null && Number.isFinite(lista) && lista > 0) {
-    return String(round2(lista));
-  }
-  return "";
-}
-
-function clampPrecioUnitBsInput(raw: string, lista: number | null, tope: number | null): string {
-  const cleaned = sanitizePrecioUnitBsDigitos(raw);
-  const t = cleaned.trim();
-  if (t === "" || t === ".") return t;
-
-  if (/^\d+\.$/.test(t)) {
-    return t;
-  }
-
-  const n = Number(t);
-  if (!Number.isFinite(n) || n < 0) return "";
-
-  let v = round2(n);
-  const { hi } = precioUnitBsBounds(lista, tope);
-  if (hi != null) v = Math.min(v, hi);
-  if (v <= 0) return "";
-
-  return String(v);
-}
-
-function snapPrecioUnitBsToRange(raw: string, lista: number | null, tope: number | null): string {
-  const cleaned = sanitizePrecioUnitBsDigitos(raw);
-  const t = cleaned.trim();
-  if (t === "" || t === ".") {
-    return defaultPrecioUnitBsStr({ precio_venta_lista_bs: lista });
-  }
-  const parseT = t.endsWith(".") ? t.slice(0, -1) : t;
-  const n = Number(parseT);
-  if (!Number.isFinite(n) || n <= 0) {
-    return defaultPrecioUnitBsStr({ precio_venta_lista_bs: lista });
-  }
-  let v = round2(n);
-  const { lo, hi } = precioUnitBsBounds(lista, tope);
-  if (hi != null) v = Math.min(v, hi);
-  if (lo != null) v = Math.max(v, lo);
-  return String(v);
-}
-
-function subtotalLineaBs(ln: LineaCot): number | null {
-  const q = parseQty(ln.cantidad);
-  if (q < 1) return null;
-  const p = precioUnitLineaEfectivo(ln);
-  if (p === null) return null;
-  return round2(q * p);
-}
-
-function normalizarTextoLectorCodigo(s: string) {
-  return s.replace(/[\u200B-\u200D\uFEFF]/g, "").replace(/[\u0000-\u001F\u007F]/g, "");
-}
-
-const PER_PAGE = 50;
+type Tc = { id: number; valor_bs_por_usd: number };
 
 export function CotizacionesPanel() {
-  const [tipoCambio, setTipoCambio] = useState<{ id: number; valor_bs_por_usd: number } | null>(null);
-  const [sucursalNombre, setSucursalNombre] = useState("");
   const [ctxLoading, setCtxLoading] = useState(true);
+  const [miSucursalId, setMiSucursalId] = useState(0);
+  const [tipoCambio, setTipoCambio] = useState<Tc | null>(null);
 
-  const [vista, setVista] = useState<"paginado" | "busqueda">("paginado");
-  const [page, setPage] = useState(1);
-  const [catalogTotal, setCatalogTotal] = useState(0);
-  const [filasCatalogo, setFilasCatalogo] = useState<ProductoCatalogoCot[]>([]);
+  const [q, setQ] = useState("");
+  const [codigo, setCodigo] = useState("");
+  const [codigoPieza, setCodigoPieza] = useState("");
+  const [especificacion, setEspecificacion] = useState("");
+  const [medida, setMedida] = useState("");
+  const [descripcion, setDescripcion] = useState("");
+  const [repuesto, setRepuesto] = useState("");
+  const [modoCatalogo, setModoCatalogo] = useState<ModoCatalogoVenta>("todos");
+  const [perPage, setPerPage] = useState(String(CATALOGO_FILAS_DEFAULT));
+
   const [catalogLoading, setCatalogLoading] = useState(false);
+  const [catalogBuscado, setCatalogBuscado] = useState(false);
+  const [catalogTotal, setCatalogTotal] = useState(0);
+  const [catalogSucursales, setCatalogSucursales] = useState<{ id: number; nombre: string }[]>([]);
+  const [catalogRows, setCatalogRows] = useState<VentaCatalogoApiRow[]>([]);
+  const [catalogoExpandido, setCatalogoExpandido] = useState(true);
 
-  const [busquedaCodigoBarra, setBusquedaCodigoBarra] = useState("");
-  const [busquedaGeneral, setBusquedaGeneral] = useState("");
+  const [codigoBuscar, setCodigoBuscar] = useState("");
   const [buscando, setBuscando] = useState(false);
 
-  const [lineas, setLineas] = useState<LineaCot[]>([]);
+  const [lineas, setLineas] = useState<VentaCarritoLinea[]>([]);
   const [cajeros, setCajeros] = useState<{ id: number; nombreCompleto: string; username: string }[]>([]);
   const [cajeroDestinoId, setCajeroDestinoId] = useState("");
   const [clienteNombre, setClienteNombre] = useState("");
   const [clienteNit, setClienteNit] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [cotizacionEnviada, setCotizacionEnviada] = useState<{ id: number; totalBs: string } | null>(null);
-
   const [msg, setMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
 
-  /** Evita que una respuesta tardía del listado paginado pise resultados de búsqueda (u otra petición). */
-  const catalogoReqSeqRef = useRef(0);
+  const metadatosHidratadosRef = useRef(new Set<number>());
+  const hidratandoMetadatosRef = useRef(false);
 
   const loadContext = useCallback(async () => {
     setCtxLoading(true);
     try {
       const res = await fetch("/api/vendedor/cotizaciones", { cache: "no-store" });
       const data = (await res.json()) as {
-        tipoCambio?: { id: number; valor_bs_por_usd: number } | null;
+        sucursalId?: number;
+        tipoCambio?: Tc | null;
         sucursalNombre?: string;
         cajeros?: { id: number; nombreCompleto: string; username: string }[];
         error?: string;
@@ -221,8 +97,8 @@ export function CotizacionesPanel() {
         setMsg({ type: "err", text: data.error ?? "No se pudo cargar el contexto." });
         return;
       }
+      setMiSucursalId(Number(data.sucursalId ?? 0));
       setTipoCambio(data.tipoCambio ?? null);
-      setSucursalNombre(data.sucursalNombre?.trim() ?? "");
       const listaCajeros = Array.isArray(data.cajeros) ? data.cajeros : [];
       setCajeros(listaCajeros);
       setCajeroDestinoId((prev) => {
@@ -240,174 +116,183 @@ export function CotizacionesPanel() {
     void loadContext();
   }, [loadContext]);
 
-  const cargarPagina = useCallback(async (p: number) => {
-    const seq = ++catalogoReqSeqRef.current;
-    setCatalogLoading(true);
-    setMsg(null);
-    try {
-      const res = await fetch("/api/vendedor/cotizaciones/catalogo", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "same-origin",
-        body: JSON.stringify({ listarActivos: true, page: p, perPage: PER_PAGE }),
+  useEffect(() => {
+    if (!miSucursalId || catalogRows.length === 0) return;
+    setLineas((prev) => {
+      let changed = false;
+      const next = prev.map((ln) => {
+        if (!carritoProductoSinMetadatos(ln.producto)) return ln;
+        const row = catalogRows.find((r) => r.id === ln.producto.id);
+        if (!row) return ln;
+        changed = true;
+        metadatosHidratadosRef.current.add(ln.producto.id);
+        return {
+          ...ln,
+          producto: fusionarProductoCarrito(ln.producto, mapCatalogRowToLookup(row, miSucursalId)),
+        };
       });
-      const data = (await res.json()) as {
-        productos?: ProductoCatalogoCot[];
-        total?: number;
-        page?: number;
-        error?: string;
-      };
-      if (seq !== catalogoReqSeqRef.current) return;
-      if (!res.ok) {
-        setFilasCatalogo([]);
-        setMsg({ type: "err", text: data.error ?? "No se pudo cargar el catálogo." });
-        return;
-      }
-      setFilasCatalogo(data.productos ?? []);
-      setCatalogTotal(Number(data.total ?? 0));
-      setPage(Number(data.page ?? p));
-    } catch {
-      if (seq !== catalogoReqSeqRef.current) return;
-      setFilasCatalogo([]);
-      setMsg({ type: "err", text: "Error de red al cargar productos." });
-    } finally {
-      if (seq === catalogoReqSeqRef.current) {
-        setCatalogLoading(false);
-      }
-    }
-  }, []);
+      return changed ? next : prev;
+    });
+  }, [catalogRows, miSucursalId]);
 
   useEffect(() => {
-    if (vista === "paginado") {
-      void cargarPagina(page);
-    }
-  }, [vista, page, cargarPagina]);
+    if (!miSucursalId || lineas.length === 0 || hidratandoMetadatosRef.current) return;
+    const pending = lineas.filter(
+      (ln) =>
+        carritoProductoSinMetadatos(ln.producto) && !metadatosHidratadosRef.current.has(ln.producto.id)
+    );
+    if (pending.length === 0) return;
 
-  const buscarPorCodigoBarra = useCallback(async () => {
-    const t = normalizarTextoLectorCodigo(busquedaCodigoBarra).trim();
-    if (!t) {
-      catalogoReqSeqRef.current += 1;
-      setBuscando(false);
-      setCatalogLoading(false);
-      setFilasCatalogo([]);
-      setCatalogTotal(0);
-      setVista("paginado");
-      setPage(1);
-      return;
-    }
-    const seq = ++catalogoReqSeqRef.current;
-    setCatalogLoading(false);
-    setBuscando(true);
-    setFilasCatalogo([]);
-    setMsg(null);
-    setVista("busqueda");
-    try {
-      const res = await fetch("/api/vendedor/cotizaciones/catalogo", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "same-origin",
-        body: JSON.stringify({ codigoBarra: t, perPage: 80 }),
-      });
-      const data = (await res.json()) as {
-        productos?: ProductoCatalogoCot[];
-        total?: number;
-        error?: string;
-      };
-      if (seq !== catalogoReqSeqRef.current) return;
-      if (!res.ok) {
-        setFilasCatalogo([]);
-        setMsg({ type: "err", text: data.error ?? "Búsqueda fallida." });
-        return;
-      }
-      const rows = (data.productos ?? []) as ProductoCatalogoCot[];
-      setFilasCatalogo(rows);
-      setCatalogTotal(rows.length > 0 ? Number(data.total ?? rows.length) : 0);
-    } catch {
-      if (seq !== catalogoReqSeqRef.current) return;
-      setFilasCatalogo([]);
-      setMsg({ type: "err", text: "Error de red en la búsqueda." });
-    } finally {
-      if (seq === catalogoReqSeqRef.current) {
-        setBuscando(false);
-      }
-    }
-  }, [busquedaCodigoBarra]);
+    hidratandoMetadatosRef.current = true;
+    let cancelled = false;
 
-  const buscarPorGeneral = useCallback(async () => {
-    const t = busquedaGeneral.trim();
-    if (!t) {
-      catalogoReqSeqRef.current += 1;
-      setBuscando(false);
-      setCatalogLoading(false);
-      setFilasCatalogo([]);
-      setCatalogTotal(0);
-      setVista("paginado");
-      setPage(1);
-      return;
-    }
-    const seq = ++catalogoReqSeqRef.current;
-    setCatalogLoading(false);
-    setBuscando(true);
-    setFilasCatalogo([]);
-    setMsg(null);
-    setVista("busqueda");
-    try {
-      const res = await fetch("/api/vendedor/cotizaciones/catalogo", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "same-origin",
-        body: JSON.stringify({ q: t, perPage: 80 }),
-      });
-      const data = (await res.json()) as {
-        productos?: ProductoCatalogoCot[];
-        total?: number;
-        error?: string;
-      };
-      if (seq !== catalogoReqSeqRef.current) return;
-      if (!res.ok) {
-        setFilasCatalogo([]);
-        setMsg({ type: "err", text: data.error ?? "Búsqueda fallida." });
-        return;
+    void (async () => {
+      const updates = new Map<number, VentaCarritoProducto>();
+      for (const ln of pending) {
+        if (cancelled) break;
+        metadatosHidratadosRef.current.add(ln.producto.id);
+        try {
+          const res = await fetch("/api/vendedor/productos/venta-lookup", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ codigo: ln.producto.codigo }),
+          });
+          const data = (await res.json()) as { producto?: ProductoVentaCompletoRow };
+          if (res.ok && data.producto) {
+            updates.set(ln.producto.id, mapCompletoToLookup(data.producto));
+          }
+        } catch {
+          /* omitir */
+        }
       }
-      const rows = (data.productos ?? []) as ProductoCatalogoCot[];
-      setFilasCatalogo(rows);
-      setCatalogTotal(rows.length > 0 ? Number(data.total ?? rows.length) : 0);
-    } catch {
-      if (seq !== catalogoReqSeqRef.current) return;
-      setFilasCatalogo([]);
-      setMsg({ type: "err", text: "Error de red en la búsqueda." });
-    } finally {
-      if (seq === catalogoReqSeqRef.current) {
-        setBuscando(false);
+      if (!cancelled && updates.size > 0) {
+        setLineas((prev) =>
+          prev.map((ln) => {
+            const fresh = updates.get(ln.producto.id);
+            if (!fresh) return ln;
+            return { ...ln, producto: fusionarProductoCarrito(ln.producto, fresh) };
+          })
+        );
       }
-    }
-  }, [busquedaGeneral]);
+      hidratandoMetadatosRef.current = false;
+    })();
 
-  function agregarProducto(p: ProductoCatalogoCot) {
-    let agregado = false;
-    setLineas((prev) => {
-      if (prev.some((x) => x.productoId === p.id)) return prev;
-      agregado = true;
-      return [...prev, nuevaLinea(p)];
-    });
-    if (vista === "busqueda" && agregado) {
-      setBusquedaCodigoBarra("");
-      setBusquedaGeneral("");
-      setFilasCatalogo([]);
-      setCatalogTotal(0);
-    }
-  }
+    return () => {
+      cancelled = true;
+    };
+  }, [lineas, miSucursalId]);
+
+  const tcVal = tipoCambio?.valor_bs_por_usd ?? 0;
 
   const totales = useMemo(() => {
     let bs = 0;
+    let usd = 0;
     for (const ln of lineas) {
       const st = subtotalLineaBs(ln);
       if (st !== null) bs = round2(bs + st);
     }
-    const tc = tipoCambio?.valor_bs_por_usd ?? 0;
-    const usd = tc > 0 ? Math.round((bs / tc) * 1e4) / 1e4 : 0;
-    return { bs, usd, tc };
-  }, [lineas, tipoCambio]);
+    if (tcVal > 0) usd = round4(bs / tcVal);
+    return { bs, usd, tc: tcVal };
+  }, [lineas, tcVal]);
+
+  function agregarAlCarrito(p: VentaCarritoProducto) {
+    setLineas((prev) => {
+      const idx = prev.findIndex((l) => l.producto.id === p.id);
+      if (idx >= 0) {
+        const copy = [...prev];
+        const cur = parseQty(copy[idx].cantidad);
+        const prevPrecio = copy[idx].precioUnitBs.trim();
+        copy[idx] = {
+          ...copy[idx],
+          producto: fusionarProductoCarrito(copy[idx].producto, p),
+          cantidad: String(Math.max(1, cur + 1)),
+          precioUnitBs: prevPrecio === "" ? defaultPrecioUnitBsStr(p) : copy[idx].precioUnitBs,
+        };
+        return copy;
+      }
+      return [...prev, nuevaLineaCarrito(p)];
+    });
+  }
+
+  async function ejecutarBusquedaCatalogo() {
+    if (!miSucursalId) return;
+    setMsg(null);
+    setCatalogLoading(true);
+    try {
+      const per = Math.trunc(Number(perPage));
+      const res = await fetch("/api/vendedor/productos/catalogo", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          q,
+          codigo,
+          codigo_pieza: codigoPieza,
+          especificacion,
+          medida,
+          descripcion,
+          repuesto,
+          modo: modoCatalogo,
+          perPage: Number.isFinite(per) && per >= 10 ? per : CATALOGO_FILAS_DEFAULT,
+        }),
+      });
+      const data = (await res.json()) as {
+        total?: number;
+        sucursales?: { id: number; nombre: string }[];
+        rows?: VentaCatalogoApiRow[];
+        error?: string;
+      };
+      if (!res.ok) {
+        setMsg({ type: "err", text: data.error ?? "No se pudo buscar en el catálogo." });
+        setCatalogRows([]);
+        setCatalogTotal(0);
+        return;
+      }
+      setCatalogTotal(Number(data.total ?? 0));
+      setCatalogSucursales(Array.isArray(data.sucursales) ? data.sucursales : []);
+      setCatalogRows(Array.isArray(data.rows) ? data.rows : []);
+    } catch {
+      setMsg({ type: "err", text: "Error de red en la búsqueda del catálogo." });
+      setCatalogRows([]);
+    } finally {
+      setCatalogBuscado(true);
+      setCatalogLoading(false);
+    }
+  }
+
+  function onAgregarDesdeTabla(row: VentaCatalogoApiRow) {
+    agregarAlCarrito(mapCatalogRowToLookup(row, miSucursalId));
+  }
+
+  async function buscarProducto(e: React.FormEvent) {
+    e.preventDefault();
+    setMsg(null);
+    const raw = codigoBuscar.trim();
+    if (!raw) return;
+    setBuscando(true);
+    try {
+      const res = await fetch("/api/vendedor/productos/venta-lookup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ codigo: raw }),
+      });
+      const data = (await res.json()) as { producto?: ProductoVentaCompletoRow; error?: string };
+      if (!res.ok) {
+        setMsg({ type: "err", text: data.error ?? "No se encontró el producto." });
+        return;
+      }
+      if (!data.producto) {
+        setMsg({ type: "err", text: "Respuesta inválida." });
+        return;
+      }
+      agregarAlCarrito(mapCompletoToLookup(data.producto));
+      setCodigoBuscar("");
+      setMsg(null);
+    } catch {
+      setMsg({ type: "err", text: "Error de red al buscar." });
+    } finally {
+      setBuscando(false);
+    }
+  }
 
   async function enviarACaja() {
     if (lineas.length === 0) {
@@ -427,16 +312,36 @@ export function CotizacionesPanel() {
     for (const ln of lineas) {
       const q = parseQty(ln.cantidad);
       if (q < 1) {
-        setMsg({ type: "err", text: `Cantidad inválida para ${ln.codigo}.` });
+        setMsg({ type: "err", text: `Cantidad inválida para ${ln.producto.codigo}.` });
         return;
+      }
+      const precioLista = ln.producto.precio_venta_lista_bs;
+      const precioExplicit = ln.precioUnitBs.trim()
+        ? round2(Number(ln.precioUnitBs.replace(",", ".")))
+        : null;
+      if (precioExplicit !== null && (!Number.isFinite(precioExplicit) || precioExplicit <= 0)) {
+        setMsg({ type: "err", text: `Precio inválido para ${ln.producto.codigo}.` });
+        return;
+      }
+      if ((precioExplicit === null || precioExplicit === undefined) && (precioLista === null || precioLista <= 0)) {
+        setMsg({ type: "err", text: `${ln.producto.codigo} no tiene precio de lista; ingresá precio manual.` });
+        return;
+      }
+      const precioFinal = precioExplicit ?? precioLista;
+      if (precioFinal != null) {
+        const chk = validarPrecioVentaBs(precioFinal, ln.producto.punto_tope);
+        if (!chk.ok) {
+          window.alert(`${ln.producto.codigo}: ${chk.message}`);
+          return;
+        }
       }
       const p = precioUnitLineaEfectivo(ln);
       if (p === null) {
-        setMsg({ type: "err", text: `Precio inválido para ${ln.codigo}.` });
+        setMsg({ type: "err", text: `Precio inválido para ${ln.producto.codigo}.` });
         return;
       }
       payloadLineas.push({
-        productoId: ln.productoId,
+        productoId: ln.producto.id,
         cantidad: q,
         precioUnitarioBs: p,
       });
@@ -479,8 +384,6 @@ export function CotizacionesPanel() {
     }
   }
 
-  const totalPaginas = Math.max(1, Math.ceil(catalogTotal / PER_PAGE));
-
   if (ctxLoading) {
     return (
       <div className="flex items-center justify-center gap-3 rounded-2xl border border-white/10 bg-slate-900/50 py-16 text-slate-400">
@@ -490,8 +393,16 @@ export function CotizacionesPanel() {
     );
   }
 
+  if (cajeros.length === 0) {
+    return (
+      <div className="rounded-xl border border-amber-500/35 bg-amber-950/30 px-4 py-3 text-sm text-amber-100" role="alert">
+        No hay cajeros activos en tu sucursal. Pedile al administrador que registre un usuario con rol cajero.
+      </div>
+    );
+  }
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 text-slate-300">
       {cotizacionEnviada ? (
         <div
           className="rounded-xl border border-emerald-500/35 bg-emerald-950/25 px-4 py-3 text-sm text-emerald-100"
@@ -520,12 +431,13 @@ export function CotizacionesPanel() {
           <div>
             <h2 className="text-sm font-semibold text-white">Tipo de cambio (referencia)</h2>
             <p className="mt-0.5 text-xs text-slate-500">
-              Los importes en USD de la cotización usan este valor como referencia (también en la hoja de impresión).
+              Los importes en USD de la cotización usan este valor (también en la hoja de impresión).
             </p>
           </div>
           {tipoCambio ? (
             <p className="font-mono text-lg font-semibold tabular-nums text-amber-100">
-              {tipoCambio.valor_bs_por_usd.toFixed(4)} <span className="text-xs font-normal text-slate-500">Bs/USD</span>
+              {tipoCambio.valor_bs_por_usd.toFixed(4)}{" "}
+              <span className="text-xs font-normal text-slate-500">Bs/USD</span>
             </p>
           ) : (
             <p className="text-sm text-amber-200/90">No hay tipo de cambio cargado.</p>
@@ -533,167 +445,12 @@ export function CotizacionesPanel() {
         </div>
       </div>
 
-      <div className="rounded-2xl border border-white/10 bg-slate-900/50 p-4">
-        <h2 className="text-sm font-semibold text-white">Buscar producto</h2>
-        <div className="mt-3 grid gap-3 sm:grid-cols-2">
-          <div className="min-w-0">
-            <label className="block text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-              Código de barra o QR (como ingreso de compra)
-            </label>
-            <div className="mt-1 flex flex-col gap-2 sm:flex-row sm:items-stretch">
-              <input
-                value={busquedaCodigoBarra}
-                onChange={(e) => setBusquedaCodigoBarra(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    void buscarPorCodigoBarra();
-                  }
-                }}
-                className={`${inpCatalogoBuscar} font-mono sm:min-w-0 sm:flex-1`}
-                placeholder="código interno"
-                autoComplete="off"
-              />
-              <button
-                type="button"
-                onClick={() => void buscarPorCodigoBarra()}
-                disabled={buscando || !normalizarTextoLectorCodigo(busquedaCodigoBarra).trim()}
-                className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {buscando ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Search className="h-4 w-4" aria-hidden />}
-                {buscando ? "Buscando…" : "Buscar"}
-              </button>
-            </div>
-          </div>
-          <div className="min-w-0">
-            <label className="block text-[10px] font-semibold uppercase tracking-wide text-slate-500">Búsqueda en catálogo</label>
-            <div className="mt-1 flex flex-col gap-2 sm:flex-row sm:items-stretch">
-              <input
-                value={busquedaGeneral}
-                onChange={(e) => setBusquedaGeneral(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    void buscarPorGeneral();
-                  }
-                }}
-                className={`${inpCatalogoBuscar} sm:min-w-0 sm:flex-1`}
-                placeholder="Código, nombre, descripción, código pieza…"
-              />
-              <button
-                type="button"
-                onClick={() => void buscarPorGeneral()}
-                disabled={buscando || !busquedaGeneral.trim()}
-                className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {buscando ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Search className="h-4 w-4" aria-hidden />}
-                {buscando ? "Buscando…" : "Buscar"}
-              </button>
-            </div>
-          </div>
-        </div>
-        <div className="mt-3 flex flex-wrap justify-end gap-2">
-          <button
-            type="button"
-            onClick={() => {
-              catalogoReqSeqRef.current += 1;
-              setBuscando(false);
-              setCatalogLoading(false);
-              setBusquedaCodigoBarra("");
-              setBusquedaGeneral("");
-              setFilasCatalogo([]);
-              setCatalogTotal(0);
-              setVista("paginado");
-              setPage(1);
-            }}
-            className="rounded-lg border border-white/15 px-3 py-2 text-xs text-slate-300 hover:bg-white/5"
-          >
-            Limpiar búsquedas
-          </button>
-        </div>
-
-        {vista === "paginado" ? (
-          <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-400">
-            <span>
-              Catálogo activo: página {page} de {totalPaginas} · {catalogTotal} producto(s)
-            </span>
-            <button
-              type="button"
-              disabled={page <= 1 || catalogLoading}
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-              className="rounded border border-white/10 px-2 py-1 text-slate-200 hover:bg-white/5 disabled:opacity-40"
-            >
-              Anterior
-            </button>
-            <button
-              type="button"
-              disabled={page >= totalPaginas || catalogLoading}
-              onClick={() => setPage((p) => p + 1)}
-              className="rounded border border-white/10 px-2 py-1 text-slate-200 hover:bg-white/5 disabled:opacity-40"
-            >
-              Siguiente
-            </button>
-          </div>
-        ) : (
-          <p className="mt-2 text-xs text-slate-500">
-            Resultados de búsqueda: {catalogTotal} coincidencia(s). «Limpiar búsquedas» volvé al listado paginado.
-          </p>
-        )}
-
-        {catalogLoading ? (
-          <div className="mt-3 flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-slate-950/60 py-10 text-sm text-slate-500">
-            <Loader2 className="h-6 w-6 animate-spin text-sky-500" />
-            Cargando productos…
-          </div>
-        ) : filasCatalogo.length > 0 ? (
-          <ul className="mt-3 max-h-64 overflow-y-auto rounded-xl border border-white/10 bg-slate-950/60 py-1 text-sm">
-            {filasCatalogo.map((p) => {
-              const yaEnCotizacion = lineas.some((l) => l.productoId === p.id);
-              return (
-                <li key={p.id} className="border-b border-white/5 last:border-0">
-                  <button
-                    type="button"
-                    disabled={yaEnCotizacion}
-                    onClick={() => agregarProducto(p)}
-                    className={`flex w-full items-start gap-3 px-3 py-2.5 text-left ${
-                      yaEnCotizacion
-                        ? "cursor-not-allowed opacity-45"
-                        : "hover:bg-sky-500/15"
-                    }`}
-                  >
-                    <Plus className="mt-0.5 h-4 w-4 shrink-0 text-sky-400" aria-hidden />
-                    <span className="min-w-0 flex-1">
-                      <span className="font-mono text-sky-300">{p.codigo}</span>
-                      {p.codigo_pieza ? (
-                        <span className="ml-2 font-mono text-xs text-slate-500">{p.codigo_pieza}</span>
-                      ) : null}
-                      <span className="mt-0.5 block text-slate-200">{p.nombre}</span>
-                      <span className="mt-0.5 block text-[11px] text-slate-500">
-                        Lista Bs {p.precio_venta_lista_bs ?? "—"} · Stock total {p.stock_total}
-                        {yaEnCotizacion ? " · ya en la cotización" : null}
-                      </span>
-                      {p.marca_auto ? (
-                        <span className="mt-0.5 block text-[11px] text-slate-500">Marca: {p.marca_auto}</span>
-                      ) : null}
-                    </span>
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        ) : vista === "paginado" && !catalogLoading ? (
-          <p className="mt-3 text-xs text-slate-500">No hay productos en esta página.</p>
-        ) : vista === "busqueda" && !buscando && !catalogLoading ? (
-          <p className="mt-3 text-xs text-slate-500">Sin coincidencias con ese criterio.</p>
-        ) : null}
-      </div>
-
-      <div className="rounded-2xl border border-white/10 bg-slate-900/50 p-4">
-        <h2 className="text-sm font-semibold text-white">Cliente y envío a caja</h2>
-        <p className="mt-0.5 text-xs text-slate-500">
-          Armá la cotización; el cajero elegido la imprimirá para el cliente (vos no imprimís desde aquí).
+      <section className="rounded-2xl border border-white/10 bg-slate-950/45 p-4 sm:p-5">
+        <h2 className="text-base font-semibold text-white">Cliente y envío a caja</h2>
+        <p className="mt-1 text-xs text-slate-500">
+          Armá la cotización; el cajero elegido la imprimirá para el cliente.
         </p>
-        <div className="mt-4 flex flex-wrap items-end gap-4">
+        <div className="mt-4 flex min-w-0 flex-wrap items-end gap-4">
           <div className="min-w-[10rem]">
             <label
               htmlFor="cot-cajero"
@@ -742,150 +499,242 @@ export function CotizacionesPanel() {
             />
           </div>
         </div>
-      </div>
+      </section>
 
-      <div className="rounded-2xl border border-white/10 bg-slate-900/50 p-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
+      <section className="rounded-2xl border border-amber-500/25 bg-gradient-to-b from-amber-500/[0.07] to-slate-950/40 p-4 sm:p-5">
+        <h2 className="text-base font-semibold text-white">Agregar con código o QR</h2>
+        <p className="mt-1 max-w-2xl text-xs text-slate-500">
+          Escaneá o pegá el código y pulsá Enter. En cotización podés incluir cualquier producto activo, tengas o no stock.
+        </p>
+        <form onSubmit={buscarProducto} className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-stretch">
+          <div className="relative min-w-0 flex-1">
+            <ScanLine
+              className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-amber-400/60"
+              aria-hidden
+            />
+            <input
+              className={`${inp} h-12 rounded-xl border-amber-500/25 bg-slate-950/90 pl-12 pr-4 text-sm shadow-inner shadow-black/30 placeholder:text-slate-600 focus:border-amber-500/50`}
+              value={codigoBuscar}
+              onChange={(e) => setCodigoBuscar(e.target.value)}
+              placeholder="Código interno, QR o referencia…"
+              autoComplete="off"
+            />
+          </div>
+          <button
+            type="submit"
+            disabled={buscando || !codigoBuscar.trim()}
+            className="inline-flex h-12 shrink-0 items-center justify-center gap-2 rounded-xl bg-amber-500 px-6 text-sm font-semibold text-slate-950 shadow-lg shadow-amber-900/20 transition hover:bg-amber-400 disabled:pointer-events-none disabled:opacity-40"
+          >
+            {buscando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" strokeWidth={2.5} />}
+            Agregar
+          </button>
+        </form>
+
+      </section>
+
+      <section className="space-y-3">
+        <button
+          type="button"
+          onClick={() => setCatalogoExpandido((v) => !v)}
+          className="flex w-full items-center justify-between gap-3 rounded-xl border border-white/10 bg-slate-950/50 px-4 py-3 text-left transition hover:border-amber-500/30 hover:bg-slate-900/60"
+        >
           <div>
-            <h2 className="text-sm font-semibold text-white">Líneas de la cotización</h2>
+            <p className="text-sm font-semibold text-white">Buscador de repuestos</p>
             <p className="mt-0.5 text-xs text-slate-500">
-              El precio unitario se carga con lista; solo números; debe quedar entre el menor y el mayor de precio de lista y
-              P. tope (igual que en nueva venta).
+              Misma tabla que nueva venta; el stock es solo referencia y no bloquea agregar líneas.
             </p>
           </div>
-        </div>
-
-        {lineas.length > 0 ? (
-          <div className="mt-4 overflow-x-auto">
-            <table className="w-full min-w-[920px] text-left text-xs">
-              <thead className="border-b border-white/10 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-                <tr>
-                  <th className="py-2 pr-2">Código</th>
-                  <th className="py-2 pr-2">Cód. pieza</th>
-                  <th className="py-2 pr-2">Medida</th>
-                  <th className="py-2 pr-2">Producto</th>
-                  <th className="py-2 pr-2">Cant.</th>
-                  <th className="py-2 pr-2 text-right">Lista Bs</th>
-                  <th className="py-2 pr-2 text-right">P. unit. Bs</th>
-                  <th className="py-2 pr-2 text-right">P. tope</th>
-                  <th className="py-2 pr-2 text-right">Subtotal Bs</th>
-                  <th className="w-10 py-2" />
-                </tr>
-              </thead>
-              <tbody>
-                {lineas.map((ln) => {
-                  const sub = subtotalLineaBs(ln);
-                  return (
-                    <tr key={ln.key} className="border-b border-white/5">
-                      <td className="py-2 pr-2 font-mono text-amber-200/90">{ln.codigo}</td>
-                      <td className="max-w-[120px] py-2 pr-2 font-mono text-slate-400">
-                        {ln.codigoPieza?.trim() || "—"}
-                      </td>
-                      <td className="max-w-[80px] py-2 pr-2 font-mono text-slate-400">{ln.medida?.trim() || "—"}</td>
-                      <td className="max-w-[200px] py-2 pr-2 text-slate-200">
-                        <span className="line-clamp-2">{ln.nombre}</span>
-                      </td>
-                      <td className="py-2 pr-2">
-                        <input
-                          className={`${inpNum} w-16`}
-                          value={ln.cantidad}
-                          onChange={(e) =>
-                            setLineas((prev) =>
-                              prev.map((x) => (x.key === ln.key ? { ...x, cantidad: e.target.value } : x))
-                            )
-                          }
-                        />
-                      </td>
-                      <td className="py-2 pr-2 text-right font-mono text-slate-400">
-                        {ln.precioListaBs != null ? ln.precioListaBs.toFixed(2) : "—"}
-                      </td>
-                      <td className="py-2 pr-2 text-right">
-                        <div className="flex flex-col items-end gap-0.5">
-                          <input
-                            className={`${inpNum} w-full max-w-[7.5rem] text-right`}
-                            type="text"
-                            inputMode="decimal"
-                            autoComplete="off"
-                            placeholder={ln.precioListaBs != null ? ln.precioListaBs.toFixed(2) : "—"}
-                            value={ln.precioUnitBs}
-                            onKeyDown={(e) => {
-                              if (e.ctrlKey || e.metaKey || e.altKey) return;
-                              if (e.key.length !== 1) return;
-                              if (/[0-9.,]/.test(e.key)) return;
-                              e.preventDefault();
-                            }}
-                            onChange={(e) =>
-                              setLineas((prev) =>
-                                prev.map((x) =>
-                                  x.key === ln.key
-                                    ? {
-                                        ...x,
-                                        precioUnitBs: clampPrecioUnitBsInput(
-                                          e.target.value,
-                                          x.precioListaBs,
-                                          x.puntoTope
-                                        ),
-                                      }
-                                    : x
-                                )
-                              )
-                            }
-                            onBlur={() =>
-                              setLineas((prev) =>
-                                prev.map((x) =>
-                                  x.key === ln.key
-                                    ? {
-                                        ...x,
-                                        precioUnitBs: snapPrecioUnitBsToRange(
-                                          x.precioUnitBs,
-                                          x.precioListaBs,
-                                          x.puntoTope
-                                        ),
-                                      }
-                                    : x
-                                )
-                              )
-                            }
-                          />
-                          {ln.precioListaBs != null &&
-                          Number.isFinite(ln.precioListaBs) &&
-                          ln.precioListaBs > 0 ? (
-                            <span className="max-w-[10rem] text-right text-[10px] font-mono leading-tight tabular-nums text-slate-500">
-                              precioVenta ({ln.precioListaBs.toFixed(2)} Bs)
-                            </span>
-                          ) : null}
-                        </div>
-                      </td>
-                      <td className="py-2 pr-2 text-right font-mono text-amber-100/85">
-                        {ln.puntoTope != null ? ln.puntoTope.toFixed(2) : "—"}
-                      </td>
-                      <td className="py-2 pr-2 text-right font-mono text-slate-200">
-                        {sub !== null ? sub.toFixed(2) : "—"}
-                      </td>
-                      <td className="py-1">
-                        <button
-                          type="button"
-                          onClick={() => setLineas((prev) => prev.filter((x) => x.key !== ln.key))}
-                          className="rounded p-2 text-rose-400 hover:bg-rose-500/15"
-                          aria-label="Quitar"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+          {catalogoExpandido ? (
+            <ChevronUp className="h-5 w-5 shrink-0 text-slate-500" />
+          ) : (
+            <ChevronDown className="h-5 w-5 shrink-0 text-slate-500" />
+          )}
+        </button>
+        {catalogoExpandido ? (
+          <div className="space-y-4">
+            <form
+              className="rounded-2xl border border-white/10 bg-slate-950/40 p-4 sm:p-5"
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (catalogLoading) return;
+                void ejecutarBusquedaCatalogo();
+              }}
+            >
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                <div className="lg:col-span-2">
+                  <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Texto</label>
+                  <input
+                    value={q}
+                    onChange={(e) => setQ(e.target.value)}
+                    placeholder="Palabras en código, nombre, descripción…"
+                    className={`${inp} mt-1`}
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                    Código exacto
+                  </label>
+                  <input
+                    value={codigo}
+                    onChange={(e) => setCodigo(e.target.value)}
+                    className={`${inp} mt-1 font-mono`}
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Cód. pieza</label>
+                  <input value={codigoPieza} onChange={(e) => setCodigoPieza(e.target.value)} className={`${inp} mt-1`} />
+                </div>
+                <div>
+                  <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                    Especificación
+                  </label>
+                  <input value={especificacion} onChange={(e) => setEspecificacion(e.target.value)} className={`${inp} mt-1`} />
+                </div>
+                <div>
+                  <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Medida</label>
+                  <input value={medida} onChange={(e) => setMedida(e.target.value)} className={`${inp} mt-1`} />
+                </div>
+                <div>
+                  <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Descripción</label>
+                  <input value={descripcion} onChange={(e) => setDescripcion(e.target.value)} className={`${inp} mt-1`} />
+                </div>
+                <div>
+                  <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Repuesto</label>
+                  <input value={repuesto} onChange={(e) => setRepuesto(e.target.value)} className={`${inp} mt-1`} />
+                </div>
+                <div>
+                  <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Qué stock ver</label>
+                  <select
+                    value={modoCatalogo}
+                    onChange={(e) => setModoCatalogo(e.target.value as ModoCatalogoVenta)}
+                    className={`${inp} mt-1`}
+                  >
+                    <option value="mi_sucursal">Solo lo vendible en mi sucursal</option>
+                    <option value="referencia">Referencia: con stock en alguna sucursal</option>
+                    <option value="todos">Todos los activos</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Máx. filas</label>
+                  <input
+                    value={perPage}
+                    onChange={(e) => setPerPage(e.target.value)}
+                    inputMode="numeric"
+                    className={`${inp} mt-1 font-mono`}
+                  />
+                </div>
+              </div>
+              <div className="mt-4 flex flex-wrap gap-2 border-t border-white/5 pt-4">
+                <button
+                  type="submit"
+                  disabled={catalogLoading}
+                  className="rounded-xl bg-amber-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-amber-400 disabled:opacity-40"
+                >
+                  {catalogLoading ? "Buscando…" : "Buscar en catálogo"}
+                </button>
+                <button
+                  type="button"
+                  className="rounded-xl border border-white/15 px-4 py-2 text-sm text-slate-300 hover:bg-white/5"
+                  onClick={() => {
+                    setQ("");
+                    setCodigo("");
+                    setCodigoPieza("");
+                    setEspecificacion("");
+                    setMedida("");
+                    setDescripcion("");
+                    setRepuesto("");
+                    setModoCatalogo("todos");
+                    setPerPage(String(CATALOGO_FILAS_DEFAULT));
+                  }}
+                >
+                  Limpiar filtros
+                </button>
+              </div>
+            </form>
+            <p className="text-xs text-slate-500">
+              {catalogLoading
+                ? "Consultando…"
+                : !catalogBuscado
+                  ? "Elegí filtros y pulsá «Buscar en catálogo»."
+                  : catalogTotal === 0
+                    ? "Sin resultados. Probá otro criterio o modo de stock."
+                    : `Mostrando ${catalogRows.length} de ${catalogTotal} producto(s).`}
+            </p>
+            <VentaCatalogoTabla
+              miSucursalId={miSucursalId}
+              sucursales={catalogSucursales}
+              rows={catalogRows}
+              loading={catalogLoading}
+              sinConsulta={!catalogBuscado}
+              permitirSinStock
+              onAgregar={onAgregarDesdeTabla}
+            />
           </div>
-        ) : (
-          <p className="mt-3 text-sm text-slate-500">Todavía no hay líneas.</p>
-        )}
+        ) : null}
+      </section>
 
-        <div className="mt-4 flex flex-wrap items-end justify-between gap-4 border-t border-white/10 pt-4">
+      <section className="space-y-3">
+        <div className="flex flex-wrap items-end justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <ShoppingBag className="h-5 w-5 text-amber-400/90" aria-hidden />
+            <h2 className="text-base font-semibold text-white">Líneas de la cotización</h2>
+          </div>
+          <p className="rounded-full border border-white/10 bg-slate-950/80 px-3 py-1 font-mono text-xs text-slate-400">
+            {lineas.length === 0 ? "Vacío" : `${lineas.length} ítem${lineas.length === 1 ? "" : "s"}`}
+          </p>
+        </div>
+        <VentaCarritoTabla
+          lineas={lineas}
+          inpPosClass={inpPos}
+          modoCotizacion
+          subtotalLineaBs={subtotalLineaBs}
+          onCantidadChange={(key, value) =>
+            setLineas((prev) => prev.map((x) => (x.key === key ? { ...x, cantidad: value } : x)))
+          }
+          onCantidadBlur={(key) =>
+            setLineas((prev) =>
+              prev.map((x) => (x.key === key ? { ...x, cantidad: snapCantidadMinima(x.cantidad) } : x))
+            )
+          }
+          onPrecioChange={(key, value) =>
+            setLineas((prev) =>
+              prev.map((x) => (x.key === key ? { ...x, precioUnitBs: clampPrecioUnitBsInput(value) } : x))
+            )
+          }
+          onPrecioBlur={(key) => {
+            const ln = lineas.find((x) => x.key === key);
+            if (ln) {
+              const ingresado = parsePrecioUnitBsExplicito(ln.precioUnitBs);
+              if (ingresado != null) {
+                const chk = validarPrecioVentaBs(ingresado, ln.producto.punto_tope);
+                if (!chk.ok) {
+                  window.alert(chk.message);
+                }
+              }
+            }
+            setLineas((prev) =>
+              prev.map((x) =>
+                x.key === key
+                  ? {
+                      ...x,
+                      precioUnitBs: snapPrecioUnitBsToRange(
+                        x.precioUnitBs,
+                        x.producto.precio_venta_lista_bs,
+                        x.producto.punto_tope
+                      ),
+                    }
+                  : x
+              )
+            );
+          }}
+          onRemove={(key) => setLineas((prev) => prev.filter((x) => x.key !== key))}
+        />
+
+        <div className="flex flex-wrap items-end justify-between gap-4 rounded-2xl border border-amber-500/20 bg-slate-950/60 p-4 sm:p-5">
           <div>
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Total cotización</p>
-            <p className="mt-1 font-mono text-2xl font-semibold text-white">{totales.bs.toFixed(2)} Bs</p>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Total cotización</p>
+            <p className="mt-1 font-mono text-3xl font-semibold tabular-nums text-amber-50">{totales.bs.toFixed(2)}</p>
+            <p className="text-sm text-amber-200/80">bolivianos</p>
             {totales.tc > 0 ? (
               <p className="mt-1 font-mono text-sm text-slate-400">≈ {totales.usd.toFixed(4)} USD</p>
             ) : null}
@@ -902,7 +751,7 @@ export function CotizacionesPanel() {
             Enviar a caja
           </button>
         </div>
-      </div>
+      </section>
     </div>
   );
 }

@@ -1,4 +1,5 @@
 import { PanelSection } from "@/app/_components/panel-section";
+import { VentasHistorialActualizarButton } from "@/app/vendedor/ventas/_components/ventas-historial-actualizar-button";
 import { VentasHistorialFiltroFechas } from "@/app/vendedor/ventas/_components/ventas-historial-filtro-fechas";
 import { requireVendedorContext } from "@/lib/auth/staff-panel-context";
 import {
@@ -76,15 +77,18 @@ export default async function VendedorVentasHistorialPage({
     <PanelSection
       variant="vendedor"
       title="Historial de ventas"
-      description={`Totales diarios en ${ctx.sucursalNombre}. Elegí un rango de fechas o usá «Ver detalle» para ver cada venta del día.`}
+      description={`Ventas al contado en ${ctx.sucursalNombre}. No incluye créditos; esas ventas están en Historial créditos.`}
     >
-      <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-end sm:justify-between">
-        <Link
-          href="/vendedor/ventas/nueva"
-          className="inline-flex w-fit rounded-xl bg-amber-500/20 px-4 py-2 text-sm font-medium text-amber-100 ring-1 ring-amber-500/35 hover:bg-amber-500/30"
-        >
-          + Nueva venta
-        </Link>
+      <div className="mb-6 flex flex-col gap-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <Link
+            href="/vendedor/ventas/nueva"
+            className="inline-flex w-fit rounded-xl bg-amber-500/20 px-4 py-2 text-sm font-medium text-amber-100 ring-1 ring-amber-500/35 hover:bg-amber-500/30"
+          >
+            + Nueva venta
+          </Link>
+          <VentasHistorialActualizarButton />
+        </div>
 
         <VentasHistorialFiltroFechas
           defaultDesde={desdeParsed}

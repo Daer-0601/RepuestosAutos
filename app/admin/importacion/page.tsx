@@ -1,4 +1,5 @@
 import { AdminPageShell } from "@/app/admin/_components/admin-page-shell";
+import { ComprasNavTabs } from "@/app/admin/importacion/_components/compras-nav-tabs";
 import { IngresoCompraForm } from "@/app/admin/importacion/ingreso-compra-form";
 import { listSucursales } from "@/lib/data/sucursales";
 import { getUltimoTipoCambio } from "@/lib/data/tipo-cambio";
@@ -27,6 +28,7 @@ export default async function AdminImportacionPage({
       backLabel="Inicio admin"
       error={sp.error}
     >
+      <ComprasNavTabs />
       <IngresoCompraForm sucursales={sucursales} tipoCambio={tc} />
     </AdminPageShell>
   );

@@ -10,11 +10,13 @@ export type ClienteRow = {
   carnet_identidad: string | null;
   direccion: string | null;
   activo: number;
+  bloqueado_credito: number;
 };
 
 export async function listClientes(): Promise<ClienteRow[]> {
   const [rows] = await pool.execute<RowDataPacket[]>(
-    `SELECT id, nombre, telefono, carnet_identidad, direccion, activo
+    `SELECT id, nombre, telefono, carnet_identidad, direccion, activo,
+            COALESCE(bloqueado_credito, 0) AS bloqueado_credito
      FROM clientes
      ORDER BY nombre ASC`
   );
@@ -23,7 +25,9 @@ export async function listClientes(): Promise<ClienteRow[]> {
 
 export async function getCliente(id: number): Promise<ClienteRow | null> {
   const [rows] = await pool.execute<RowDataPacket[]>(
-    `SELECT id, nombre, telefono, carnet_identidad, direccion, activo FROM clientes WHERE id = ? LIMIT 1`,
+    `SELECT id, nombre, telefono, carnet_identidad, direccion, activo,
+            COALESCE(bloqueado_credito, 0) AS bloqueado_credito
+     FROM clientes WHERE id = ? LIMIT 1`,
     [id]
   );
   const r = rows[0] as ClienteRow | undefined;

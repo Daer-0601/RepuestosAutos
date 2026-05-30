@@ -2,9 +2,10 @@ import { getCajeroStaffContextOrNull } from "@/lib/auth/staff-panel-context";
 import {
   deleteCajaMovimiento,
   listCajaMovimientosDia,
+  countVentasCobradasDiaSucursal,
   listVentasProductosDiaSucursal,
   registrarCajaMovimiento,
-  totalVentasConfirmadasDiaBs,
+  totalVentasCobradasDiaBsReconciliado,
   type CajaMovimientoTipo,
 } from "@/lib/data/caja-movimientos";
 import { getUltimoTipoCambio } from "@/lib/data/tipo-cambio";
@@ -26,31 +27,37 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const fecha = parseIsoDateOnly(searchParams.get("fecha")) ?? defaultHoyIso();
 
-  const [movimientos, ventasProductos, ventaTotalBs, ultimoTc, u] = await Promise.all([
-    listCajaMovimientosDia(ctx.sucursalId, fecha),
-    listVentasProductosDiaSucursal(ctx.sucursalId, fecha),
-    totalVentasConfirmadasDiaBs(ctx.sucursalId, fecha),
-    getUltimoTipoCambio(),
-    getUsuario(ctx.userId),
-  ]);
+  const [movimientos, ventasProductos, ventaTotalBs, cantidadVentasCobradas, ultimoTc, u] =
+    await Promise.all([
+      listCajaMovimientosDia(ctx.sucursalId, fecha),
+      listVentasProductosDiaSucursal(ctx.sucursalId, fecha),
+      totalVentasCobradasDiaBsReconciliado(ctx.sucursalId, fecha),
+      countVentasCobradasDiaSucursal(ctx.sucursalId, fecha),
+      getUltimoTipoCambio(),
+      getUsuario(ctx.userId),
+    ]);
 
   const cajeroUsername = (ctx.username || u?.username || "").trim() || "—";
   const cajeroNombre =
     String(u?.nombre_completo ?? "").trim() || cajeroUsername;
 
-  return NextResponse.json({
-    fecha,
-    sucursalNombre: ctx.sucursalNombre,
-    tiendaCodigo: codigoTienda(ctx.sucursalId, ctx.sucursalNombre),
-    cajeroUsername,
-    cajeroNombre,
-    movimientos,
-    ventasProductos,
-    ventaTotalBs,
-    tipoCambioReferencia: ultimoTc
-      ? { id: ultimoTc.id, valorBsPorUsd: ultimoTc.valor_bs_por_usd }
-      : null,
-  });
+  return NextResponse.json(
+    {
+      fecha,
+      sucursalNombre: ctx.sucursalNombre,
+      tiendaCodigo: codigoTienda(ctx.sucursalId, ctx.sucursalNombre),
+      cajeroUsername,
+      cajeroNombre,
+      movimientos,
+      ventasProductos,
+      ventaTotalBs,
+      cantidadVentasCobradas,
+      tipoCambioReferencia: ultimoTc
+        ? { id: ultimoTc.id, valorBsPorUsd: ultimoTc.valor_bs_por_usd }
+        : null,
+    },
+    { headers: { "Cache-Control": "no-store, no-cache, must-revalidate", Pragma: "no-cache" } }
+  );
 }
 
 export async function POST(request: Request) {

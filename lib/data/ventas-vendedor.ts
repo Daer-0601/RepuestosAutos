@@ -1,6 +1,7 @@
 import "server-only";
 
 import { pool } from "@/lib/db";
+import { assertClientePuedeRecibirCredito } from "@/lib/data/creditos";
 import { getCliente } from "@/lib/data/clientes";
 import { condicionCodigoQrExacta } from "@/lib/data/producto-codigo-busqueda-exacta";
 import { CATALOGO_FILAS_DEFAULT, CATALOGO_FILAS_MAX } from "@/lib/catalogo-productos-constants";
@@ -15,6 +16,11 @@ import { getProducto, listProductoImagenes } from "@/lib/data/productos";
 import { getSucursal, listSucursales } from "@/lib/data/sucursales";
 import { sqlInt } from "@/lib/data/sql-utils";
 import { MYSQL_SESSION_OFFSET, formatDateTimeMysqlBolivia, mysqlValueToIsoDateOnly } from "@/lib/fecha-bolivia";
+
+/** Ventas entregadas o pendientes a crédito no son ingreso al contado. */
+const SQL_EXCLUIR_VENTAS_CREDITO = `
+  AND v.tipo_pago <> 'credito'
+  AND NOT EXISTS (SELECT 1 FROM creditos cr0 WHERE cr0.venta_id = v.id)`;
 import { assertCajeroDestinoValido, ensureVentasCobroCajaColumns } from "@/lib/data/ventas-cobro-cajero";
 import { validarPrecioVentaBs } from "@/lib/venta-precio-lista-tope-range";
 import type {
@@ -244,13 +250,55 @@ export type ClienteVentaOpt = {
   nombre: string;
 };
 
+export type ClienteCreditoBusquedaRow = {
+  id: number;
+  nombre: string;
+  telefono: string | null;
+  carnet_identidad: string | null;
+};
+
 export async function listClientesActivosParaVenta(): Promise<ClienteVentaOpt[]> {
+  const rows = await buscarClientesActivosParaCredito("", 500);
+  return rows.map((r) => ({ id: r.id, nombre: r.nombre }));
+}
+
+/** Clientes activos y habilitados para crédito (mismo directorio que «Clientes»). */
+export async function buscarClientesActivosParaCredito(
+  q: string,
+  limit = 25
+): Promise<ClienteCreditoBusquedaRow[]> {
+  const { ensureCreditosSchema } = await import("@/lib/data/creditos");
+  await ensureCreditosSchema();
+
+  const term = q.trim();
+  const max = Math.min(Math.max(Math.trunc(limit) || 25, 1), 100);
+  const params: (string | number)[] = [];
+  let filtro = "";
+
+  if (term) {
+    const like = `%${term.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_")}%`;
+    filtro = `AND (nombre LIKE ? OR IFNULL(telefono, '') LIKE ? OR IFNULL(carnet_identidad, '') LIKE ?)`;
+    params.push(like, like, like);
+  }
+
   const [rows] = await pool.execute<RowDataPacket[]>(
-    `SELECT id, nombre FROM clientes WHERE activo = 1 ORDER BY nombre ASC`
+    `SELECT id, nombre, telefono, carnet_identidad
+     FROM clientes
+     WHERE activo = 1 AND COALESCE(bloqueado_credito, 0) = 0
+     ${filtro}
+     ORDER BY nombre ASC
+     LIMIT ${max}`,
+    params
   );
+
   return (rows as RowDataPacket[]).map((r) => ({
     id: Number(r.id),
-    nombre: String(r.nombre ?? ""),
+    nombre: String(r.nombre ?? "").trim(),
+    telefono: r.telefono != null && String(r.telefono).trim() !== "" ? String(r.telefono).trim() : null,
+    carnet_identidad:
+      r.carnet_identidad != null && String(r.carnet_identidad).trim() !== ""
+        ? String(r.carnet_identidad).trim()
+        : null,
   }));
 }
 
@@ -262,7 +310,66 @@ export type VentaListadoRow = {
   total_usd: string;
   estado_cobro: "cobrado" | "pendiente";
   cliente_nombre: string | null;
+  vendedor_nombre: string;
 };
+
+export type VentaDetalleProductoRow = {
+  ventaId: number;
+  productoId: number;
+  codigo: string;
+  codigoPieza: string;
+  medida: string;
+  nombre: string;
+  marcaAuto: string | null;
+  procedencia: string | null;
+  unidad: string | null;
+  cantidad: number;
+  precioUnitarioBs: number;
+  totalLineaBs: number;
+};
+
+export async function listVentasDetalleProductosPorIds(
+  ventaIds: number[]
+): Promise<VentaDetalleProductoRow[]> {
+  const ids = [...new Set(ventaIds.filter((id) => Number.isFinite(id) && id > 0))];
+  if (ids.length === 0) return [];
+
+  const placeholders = ids.map(() => "?").join(",");
+  const [rows] = await pool.query<RowDataPacket[]>(
+    `SELECT d.venta_id,
+            d.producto_id,
+            d.cantidad,
+            d.precio_unitario_bs,
+            d.total_linea_bs,
+            COALESCE(NULLIF(TRIM(p.codigo), ''), '—') AS codigo,
+            COALESCE(NULLIF(TRIM(p.codigo_pieza), ''), '—') AS codigo_pieza,
+            COALESCE(NULLIF(TRIM(p.medida), ''), '—') AS medida,
+            COALESCE(NULLIF(TRIM(p.nombre), ''), '—') AS nombre,
+            NULLIF(TRIM(p.marca_auto), '') AS marca_auto,
+            NULLIF(TRIM(p.procedencia), '') AS procedencia,
+            NULLIF(TRIM(p.unidad), '') AS unidad
+     FROM venta_detalle d
+     INNER JOIN productos p ON p.id = d.producto_id
+     WHERE d.venta_id IN (${placeholders})
+     ORDER BY d.venta_id ASC, d.id ASC`,
+    ids
+  );
+
+  return (rows as RowDataPacket[]).map((r) => ({
+    ventaId: Number(r.venta_id),
+    productoId: Number(r.producto_id),
+    codigo: String(r.codigo ?? "—"),
+    codigoPieza: String(r.codigo_pieza ?? "—"),
+    medida: String(r.medida ?? "—"),
+    nombre: String(r.nombre ?? "—"),
+    marcaAuto: r.marca_auto != null && String(r.marca_auto).trim() !== "" ? String(r.marca_auto) : null,
+    procedencia: r.procedencia != null && String(r.procedencia).trim() !== "" ? String(r.procedencia) : null,
+    unidad: r.unidad != null && String(r.unidad).trim() !== "" ? String(r.unidad) : null,
+    cantidad: Number(r.cantidad ?? 0),
+    precioUnitarioBs: Number(r.precio_unitario_bs ?? 0),
+    totalLineaBs: Number(r.total_linea_bs ?? 0),
+  }));
+}
 
 export async function listVentasPorSucursal(
   sucursalId: number,
@@ -284,10 +391,13 @@ export async function listVentasPorSucursal(
   }
   const [rows] = await pool.query<RowDataPacket[]>(
     `SELECT v.id, v.fecha, v.tipo_pago, v.total_bs, v.total_usd, v.estado_cobro,
-            COALESCE(NULLIF(TRIM(c.nombre), ''), NULLIF(TRIM(v.cliente_nombre_libre), '')) AS cliente_nombre
+            COALESCE(NULLIF(TRIM(c.nombre), ''), NULLIF(TRIM(v.cliente_nombre_libre), '')) AS cliente_nombre,
+            COALESCE(NULLIF(TRIM(u.nombre_completo), ''), u.username, '—') AS vendedor_nombre
      FROM ventas v
+     INNER JOIN usuarios u ON u.id = v.usuario_id
      LEFT JOIN clientes c ON c.id = v.cliente_id
      WHERE v.sucursal_id = ? AND v.estado = 'confirmada'
+     ${SQL_EXCLUIR_VENTAS_CREDITO}
      ${dateClause}
      ORDER BY v.fecha DESC, v.id DESC
      LIMIT ${lim}`,
@@ -321,6 +431,7 @@ export async function listTotalesVentasPorDiaPorSucursal(
             COALESCE(SUM(v.total_usd), 0) AS sum_usd
      FROM ventas v
      WHERE v.sucursal_id = ? AND v.estado = 'confirmada'
+       ${SQL_EXCLUIR_VENTAS_CREDITO}
        AND DATE(v.fecha) >= ? AND DATE(v.fecha) <= ?
      GROUP BY DATE(v.fecha)
      ORDER BY dia DESC`,
@@ -354,6 +465,7 @@ export async function sumTotalesVentasPorSucursalEnRango(
             COUNT(*) AS n
      FROM ventas v
      WHERE v.sucursal_id = ? AND v.estado = 'confirmada'
+       ${SQL_EXCLUIR_VENTAS_CREDITO}
        AND DATE(v.fecha) >= ? AND DATE(v.fecha) <= ?`,
     [sucursalId, d1, d2]
   );
@@ -392,6 +504,8 @@ export type RegistrarVentaVendedorInput = {
   creditoFechaLimite: string | null;
   /** Envía la venta a caja; el cajero registra forma de pago y cobro. */
   enviarACaja?: boolean;
+  /** Venta a crédito (cliente obligatorio; entrega y nota en caja). */
+  esCredito?: boolean;
   cajeroDestinoUsuarioId?: number | null;
 };
 
@@ -547,14 +661,13 @@ export async function registrarVentaVendedor(input: RegistrarVentaVendedorInput)
     return { ok: false, message: "Tipo de pago inválido." };
   }
 
-  if (input.tipoPago === "credito") {
+  const esCredito = input.esCredito === true || input.tipoPago === "credito";
+  if (esCredito) {
     if (input.clienteId == null || input.clienteId < 1) {
-      return { ok: false, message: "Las ventas a crédito requieren cliente." };
+      return { ok: false, message: "Las ventas a crédito requieren un cliente registrado." };
     }
-    const cli = await getCliente(input.clienteId);
-    if (!cli || cli.activo !== 1) {
-      return { ok: false, message: "Cliente inválido o inactivo." };
-    }
+    const chk = await assertClientePuedeRecibirCredito(Math.trunc(input.clienteId));
+    if (!chk.ok) return chk;
   }
 
   const conn = await pool.getConnection();
@@ -582,8 +695,15 @@ export async function registrarVentaVendedor(input: RegistrarVentaVendedorInput)
       }
     }
 
-    const estadoCobro = enviarACaja ? "pendiente" : input.tipoPago === "credito" ? "pendiente" : "cobrado";
-    const tipoPagoInsert = enviarACaja ? "efectivo" : input.tipoPago!;
+    const estadoCobro = enviarACaja || esCredito ? "pendiente" : "cobrado";
+    const tipoPagoInsert = enviarACaja
+      ? esCredito
+        ? "credito"
+        : "efectivo"
+      : input.tipoPago!;
+    const tipoNotaInsert =
+      input.tipoNota?.trim() ||
+      (esCredito ? "nota_entrega" : enviarACaja ? "proforma_1" : null);
     const cajeroDestinoId =
       enviarACaja && input.cajeroDestinoUsuarioId != null
         ? Math.trunc(input.cajeroDestinoUsuarioId)
@@ -600,7 +720,7 @@ export async function registrarVentaVendedor(input: RegistrarVentaVendedorInput)
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'confirmada', ?, ?)`,
       [
         input.numeroDocumento?.trim() || null,
-        input.tipoNota?.trim() || null,
+        tipoNotaInsert,
         input.clienteId && input.clienteId > 0 ? input.clienteId : null,
         input.clienteNombreLibre?.trim() || null,
         input.clienteNit?.trim() || null,
@@ -681,23 +801,6 @@ export async function registrarVentaVendedor(input: RegistrarVentaVendedorInput)
           `Venta #${ventaId}`,
           fechaVentaMysql,
         ]
-      );
-    }
-
-    if (!enviarACaja && input.tipoPago === "credito") {
-      let fechaLim: string | null = null;
-      if (input.creditoFechaLimite?.trim()) {
-        const d = input.creditoFechaLimite.trim();
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) {
-          await conn.rollback();
-          return { ok: false, message: "Fecha límite de crédito inválida (usá AAAA-MM-DD)." };
-        }
-        fechaLim = d;
-      }
-      await conn.execute(
-        `INSERT INTO creditos (venta_id, monto_total_bs, saldo_pendiente_bs, fecha_inicio, fecha_limite, estado)
-         VALUES (?, ?, ?, ?, ?, 'pendiente')`,
-        [ventaId, subtotalBs, subtotalBs, fechaVentaMysql.slice(0, 10), fechaLim]
       );
     }
 

@@ -15,7 +15,12 @@ export default async function AdminClientesPage() {
     <AdminPageShell
       title="Clientes"
       description="Directorio para ventas y créditos."
-      actions={<AdminButtonLink href="/admin/clientes/nueva">Nuevo cliente</AdminButtonLink>}
+      actions={
+        <>
+          <AdminButtonLink href="/admin/clientes/bloqueados">Bloqueados (crédito)</AdminButtonLink>
+          <AdminButtonLink href="/admin/clientes/nueva">Nuevo cliente</AdminButtonLink>
+        </>
+      }
     >
       <div className="overflow-hidden rounded-2xl border border-white/10 bg-slate-900/40">
         <table className="w-full text-left text-sm">

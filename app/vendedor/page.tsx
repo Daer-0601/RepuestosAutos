@@ -16,10 +16,17 @@ const cards = [
   },
   {
     href: "/vendedor/ventas",
-    title: "Historial",
-    desc: "Totales por día y detalle de ventas de tu sucursal.",
+    title: "Historial ventas",
+    desc: "Ventas al contado cobradas en caja (sin créditos).",
     icon: ScrollText,
     ring: "from-rose-500/15 to-slate-800/10 ring-rose-500/20",
+  },
+  {
+    href: "/vendedor/creditos",
+    title: "Historial créditos",
+    desc: "Ventas a crédito: entrega, plazo y estado de cobro.",
+    icon: CreditCard,
+    ring: "from-violet-500/15 to-slate-800/10 ring-violet-500/25",
   },
   {
     href: "/vendedor/clientes",
@@ -34,13 +41,6 @@ const cards = [
     desc: "Presupuestos con el catálogo de productos activos.",
     icon: FileText,
     ring: "from-violet-500/15 to-amber-900/10 ring-violet-500/25",
-  },
-  {
-    href: "/vendedor/creditos",
-    title: "Créditos",
-    desc: "Seguimiento de ventas a crédito y abonos.",
-    icon: CreditCard,
-    ring: "from-amber-600/15 to-emerald-900/10 ring-amber-500/20",
   },
 ] as const;
 

@@ -2,6 +2,7 @@ import { getCajeroStaffContextOrNull } from "@/lib/auth/staff-panel-context";
 import {
   getVendedorActivoEnSucursal,
   listSalidasDiariasArqueoPorVendedor,
+  totalesSalidasDiarias,
 } from "@/lib/data/arqueo-cajero";
 import { formatDateTimeMysqlBolivia, parseIsoDateOnly } from "@/lib/fecha-bolivia";
 import { NextResponse } from "next/server";
@@ -35,17 +36,17 @@ export async function GET(request: Request) {
   }
 
   const lineas = await listSalidasDiariasArqueoPorVendedor(ctx.sucursalId, usuarioId, desde, hasta);
-  let totalBs = 0;
-  for (const ln of lineas) {
-    totalBs = Math.round((totalBs + ln.totalLineaBs) * 100) / 100;
-  }
+  const totales = totalesSalidasDiarias(lineas);
 
-  return NextResponse.json({
-    sucursalNombre: ctx.sucursalNombre,
-    vendedor,
-    fechaDesde: desde,
-    fechaHasta: hasta,
-    lineas,
-    totales: { totalBs },
-  });
+  return NextResponse.json(
+    {
+      sucursalNombre: ctx.sucursalNombre,
+      vendedor,
+      fechaDesde: desde,
+      fechaHasta: hasta,
+      lineas,
+      totales,
+    },
+    { headers: { "Cache-Control": "no-store, no-cache, must-revalidate", Pragma: "no-cache" } }
+  );
 }

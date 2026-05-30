@@ -1,56 +1,104 @@
 "use client";
 
-import { Plus, Search, Trash2 } from "lucide-react";
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { ProductosCatalogoTabla } from "@/app/admin/productos/_components/productos-catalogo-tabla";
+import {
+  TraspasoLineasTabla,
+  type TraspasoLineaRow,
+} from "@/app/admin/traspasos/_components/traspaso-lineas-tabla";
+import { CATALOGO_FILAS_DEFAULT } from "@/lib/catalogo-productos-constants";
+import type { ProductoCatalogoRowConStock } from "@/lib/data/productos-catalogo";
+import type { SucursalRow } from "@/lib/data/sucursales";
+import { ChevronDown, ChevronUp, Loader2, Plus, ScanLine } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
-type SucursalOpt = { id: number; nombre: string };
+const inp =
+  "w-full rounded border border-white/10 bg-slate-950/80 px-2 py-1.5 text-xs text-white placeholder:text-slate-600 outline-none focus:border-sky-500/40";
 
-type ProductoRow = {
-  producto_id: number;
-  codigo: string;
-  nombre: string;
-  stock: number;
+const inpBuscarTodo =
+  "w-full rounded border border-white/10 bg-slate-950/80 px-1.5 py-1 text-[11px] leading-snug text-white placeholder:text-slate-600 outline-none focus:border-sky-500/40 placeholder:text-[10px]";
+
+type CatalogoRowJson = Omit<ProductoCatalogoRowConStock, "stocksPorSucursal"> & {
+  stocksPorSucursal: Record<string, number>;
 };
 
-type LineaState = {
-  key: string;
-  query: string;
-  buscando: boolean;
-  resultados: ProductoRow[];
-  productoId: number | null;
-  codigo: string;
-  nombre: string;
-  stockOrigen: number;
-  cantidad: string;
-};
+function hydrateCatalogoRow(r: CatalogoRowJson): ProductoCatalogoRowConStock {
+  const map = new Map<number, number>();
+  for (const [k, v] of Object.entries(r.stocksPorSucursal ?? {})) {
+    map.set(Number(k), Number(v));
+  }
+  return { ...r, stocksPorSucursal: map };
+}
 
-function newLine(): LineaState {
+function metadatosLineaDesdeProducto(p: ProductoCatalogoRowConStock) {
+  return {
+    codigo: p.codigo,
+    codigoPieza: p.codigo_pieza,
+    medida: p.medida,
+    nombre: p.nombre,
+    unidad: p.unidad,
+    descripcion: p.descripcion,
+    qrPayload: p.qr_payload?.trim() ? p.qr_payload.trim() : p.codigo,
+    imagenesUrls: Array.isArray(p.imagenes_urls) ? p.imagenes_urls : [],
+  };
+}
+
+function nuevaLineaDesdeProducto(p: ProductoCatalogoRowConStock, stockOrigen: number): TraspasoLineaRow {
   return {
     key: typeof crypto !== "undefined" ? crypto.randomUUID() : String(Math.random()),
-    query: "",
-    buscando: false,
-    resultados: [],
-    productoId: null,
-    codigo: "",
-    nombre: "",
-    stockOrigen: 0,
+    productoId: p.id,
+    ...metadatosLineaDesdeProducto(p),
+    stockOrigen,
     cantidad: "1",
   };
 }
 
-export function TraspasoForm({ sucursales }: { sucursales: SucursalOpt[] }) {
+function parseQty(s: string): number {
+  const n = Math.trunc(Number(s.replace(",", ".")));
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+function snapCantidadTraspaso(raw: string, stockOrigen: number): string {
+  const max = Math.max(0, Math.trunc(stockOrigen));
+  const q = parseQty(raw);
+  if (max < 1) return q > 0 ? String(q) : "1";
+  if (q < 1) return "1";
+  if (q > max) return String(max);
+  return String(q);
+}
+
+export function TraspasoForm({ sucursales }: { sucursales: SucursalRow[] }) {
   const [sucursalOrigenId, setSucursalOrigenId] = useState(sucursales[0]?.id ? String(sucursales[0].id) : "");
   const [sucursalDestinoId, setSucursalDestinoId] = useState(sucursales[1]?.id ? String(sucursales[1].id) : "");
   const [nota, setNota] = useState("");
-  const [lineas, setLineas] = useState<LineaState[]>([newLine()]);
-  const [stockOrigenRows, setStockOrigenRows] = useState<ProductoRow[]>([]);
-  const [stockOrigenLoading, setStockOrigenLoading] = useState(false);
+
+  const [q, setQ] = useState("");
+  const [codigo, setCodigo] = useState("");
+  const [codigoPieza, setCodigoPieza] = useState("");
+  const [especificacion, setEspecificacion] = useState("");
+  const [medida, setMedida] = useState("");
+  const [descripcion, setDescripcion] = useState("");
+  const [repuesto, setRepuesto] = useState("");
+  const [soloConStockEnOrigen, setSoloConStockEnOrigen] = useState(true);
+  const [perPage, setPerPage] = useState(String(CATALOGO_FILAS_DEFAULT));
+
+  const [catalogLoading, setCatalogLoading] = useState(false);
+  const [catalogBuscado, setCatalogBuscado] = useState(false);
+  const [catalogTotal, setCatalogTotal] = useState(0);
+  const [catalogRows, setCatalogRows] = useState<ProductoCatalogoRowConStock[]>([]);
+  const [catalogoExpandido, setCatalogoExpandido] = useState(true);
+
+  const [codigoBuscar, setCodigoBuscar] = useState("");
+  const [buscandoCodigo, setBuscandoCodigo] = useState(false);
+
+  const [lineas, setLineas] = useState<TraspasoLineaRow[]>([]);
   const [pending, setPending] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
 
   const origenNum = Number(sucursalOrigenId);
   const destinoNum = Number(sucursalDestinoId);
+
+  const idsEnCarrito = useMemo(() => new Set(lineas.map((l) => l.productoId)), [lineas]);
 
   const puedeEnviar = useMemo(
     () =>
@@ -59,74 +107,162 @@ export function TraspasoForm({ sucursales }: { sucursales: SucursalOpt[] }) {
       Number.isFinite(destinoNum) &&
       destinoNum > 0 &&
       origenNum !== destinoNum &&
-      lineas.some((l) => l.productoId != null),
-    [destinoNum, lineas, origenNum]
+      lineas.length > 0,
+    [destinoNum, lineas.length, origenNum]
+  );
+
+  const stockEnOrigen = useCallback(
+    (p: ProductoCatalogoRowConStock) => p.stocksPorSucursal.get(origenNum) ?? 0,
+    [origenNum]
+  );
+
+  const agregarProducto = useCallback(
+    (p: ProductoCatalogoRowConStock) => {
+      const stock = stockEnOrigen(p);
+      if (stock < 1) {
+        setErr(`${p.codigo}: sin stock en la sucursal origen.`);
+        return;
+      }
+      setErr(null);
+      setLineas((prev) => {
+        const idx = prev.findIndex((l) => l.productoId === p.id);
+        if (idx >= 0) {
+          const copy = [...prev];
+          const cur = parseQty(copy[idx].cantidad);
+          const next = Math.min(stock, cur + 1);
+          copy[idx] = {
+            ...copy[idx],
+            ...metadatosLineaDesdeProducto(p),
+            stockOrigen: stock,
+            cantidad: String(Math.max(1, next)),
+          };
+          return copy;
+        }
+        return [...prev, nuevaLineaDesdeProducto(p, stock)];
+      });
+    },
+    [stockEnOrigen]
+  );
+
+  const ejecutarBusquedaCatalogo = useCallback(async () => {
+    if (!Number.isFinite(origenNum) || origenNum < 1) {
+      setErr("Elegí sucursal origen antes de buscar.");
+      return;
+    }
+    setErr(null);
+    setCatalogLoading(true);
+    try {
+      const per = Math.trunc(Number(perPage));
+      const res = await fetch("/api/admin/traspasos/catalogo", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sucursalOrigenId: origenNum,
+          soloConStockEnOrigen,
+          q,
+          codigo,
+          codigo_pieza: codigoPieza,
+          especificacion,
+          medida,
+          descripcion,
+          repuesto,
+          perPage: Number.isFinite(per) && per >= 10 ? per : CATALOGO_FILAS_DEFAULT,
+        }),
+      });
+      const data = (await res.json()) as {
+        total?: number;
+        rows?: CatalogoRowJson[];
+        error?: string;
+      };
+      if (!res.ok) {
+        throw new Error(data.error ?? "No se pudo buscar en el catálogo.");
+      }
+      setCatalogTotal(Number(data.total ?? 0));
+      setCatalogRows((data.rows ?? []).map(hydrateCatalogoRow));
+    } catch (e) {
+      setCatalogRows([]);
+      setCatalogTotal(0);
+      setErr(e instanceof Error ? e.message : "Error al buscar en catálogo.");
+    } finally {
+      setCatalogBuscado(true);
+      setCatalogLoading(false);
+    }
+  }, [
+    codigo,
+    codigoPieza,
+    descripcion,
+    especificacion,
+    medida,
+    origenNum,
+    perPage,
+    q,
+    repuesto,
+    soloConStockEnOrigen,
+  ]);
+
+  const onCatalogFilterKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key !== "Enter") return;
+      const el = e.target;
+      if (!(el instanceof HTMLInputElement) || el.type === "checkbox") return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (catalogLoading || !sucursalOrigenId) return;
+      void ejecutarBusquedaCatalogo();
+    },
+    [catalogLoading, ejecutarBusquedaCatalogo, sucursalOrigenId]
   );
 
   useEffect(() => {
-    if (!Number.isFinite(origenNum) || origenNum < 1) {
-      setStockOrigenRows([]);
-      return;
-    }
-    let cancelled = false;
-    setStockOrigenLoading(true);
-    fetch(`/api/admin/traspasos?sucursal=${origenNum}&limit=50`, { cache: "no-store" })
-      .then(async (res) => {
-        const data = (await res.json()) as { productos?: ProductoRow[]; error?: string };
-        if (!res.ok) {
-          throw new Error(data.error || "No se pudo cargar stock de origen.");
-        }
-        if (!cancelled) {
-          setStockOrigenRows(data.productos ?? []);
-        }
-      })
-      .catch((e) => {
-        if (!cancelled) {
-          setStockOrigenRows([]);
-          setErr(e instanceof Error ? e.message : "No se pudo cargar stock de origen.");
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setStockOrigenLoading(false);
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
+    setLineas([]);
+    setCatalogBuscado(false);
+    setCatalogRows([]);
+    setCatalogTotal(0);
   }, [origenNum]);
 
-  function updateLine(key: string, patch: Partial<LineaState>) {
-    setLineas((prev) => prev.map((l) => (l.key === key ? { ...l, ...patch } : l)));
-  }
+  useEffect(() => {
+    if (catalogBuscado && Number.isFinite(origenNum) && origenNum > 0) {
+      void ejecutarBusquedaCatalogo();
+    }
+    // Solo al cambiar filtro de stock en origen; no en cada tecla de filtros de texto.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [soloConStockEnOrigen]);
 
-  function addLine() {
-    setLineas((prev) => [...prev, newLine()]);
-  }
-
-  function removeLine(key: string) {
-    setLineas((prev) => (prev.length <= 1 ? prev : prev.filter((l) => l.key !== key)));
-  }
-
-  async function buscarLinea(key: string) {
-    const q = lineas.find((l) => l.key === key)?.query.trim() ?? "";
-    if (!q) return;
+  async function buscarPorCodigo() {
+    const raw = codigoBuscar.trim();
+    if (!raw) return;
     if (!Number.isFinite(origenNum) || origenNum < 1) {
       setErr("Elegí sucursal origen.");
       return;
     }
-
-    updateLine(key, { buscando: true, resultados: [] });
+    setBuscandoCodigo(true);
+    setErr(null);
     try {
-      const res = await fetch(`/api/admin/traspasos?sucursal=${origenNum}&q=${encodeURIComponent(q)}`, {
-        cache: "no-store",
+      const res = await fetch("/api/admin/traspasos/catalogo", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sucursalOrigenId: origenNum,
+          soloConStockEnOrigen: false,
+          codigo: raw,
+          perPage: 20,
+        }),
       });
-      const data = (await res.json()) as { productos?: ProductoRow[]; error?: string };
-      if (!res.ok) throw new Error(data.error || "No se pudo buscar productos.");
-      updateLine(key, { resultados: data.productos ?? [], buscando: false });
+      const data = (await res.json()) as { rows?: CatalogoRowJson[]; error?: string };
+      if (!res.ok) throw new Error(data.error ?? "No se encontró el producto.");
+      const rows = (data.rows ?? []).map(hydrateCatalogoRow);
+      if (rows.length === 0) {
+        setErr(`No hay producto activo con código «${raw}».`);
+        return;
+      }
+      const exacto =
+        rows.find((r) => r.codigo.trim() === raw || r.qr_payload?.trim() === raw) ?? rows[0];
+      agregarProducto(exacto);
+      setCodigoBuscar("");
     } catch (e) {
-      updateLine(key, { buscando: false });
-      setErr(e instanceof Error ? e.message : "No se pudo buscar productos.");
+      setErr(e instanceof Error ? e.message : "Error al buscar por código.");
+    } finally {
+      setBuscandoCodigo(false);
     }
   }
 
@@ -144,28 +280,23 @@ export function TraspasoForm({ sucursales }: { sucursales: SucursalOpt[] }) {
       return;
     }
 
-    const payloadLineas = lineas
-      .map((l) => ({
-        productoId: l.productoId,
-        cantidad: Number(l.cantidad),
-        codigo: l.codigo,
-        stockOrigen: l.stockOrigen,
-      }))
-      .filter((l) => l.productoId != null);
+    const payloadLineas: { productoId: number; cantidad: number }[] = [];
+    for (const ln of lineas) {
+      const cant = parseQty(ln.cantidad);
+      if (cant < 1) {
+        setErr(`Cantidad inválida para ${ln.codigo}.`);
+        return;
+      }
+      if (cant > ln.stockOrigen) {
+        setErr(`La cantidad supera el stock en origen para ${ln.codigo} (máx. ${ln.stockOrigen}).`);
+        return;
+      }
+      payloadLineas.push({ productoId: ln.productoId, cantidad: cant });
+    }
 
     if (payloadLineas.length === 0) {
       setErr("Agregá al menos un producto.");
       return;
-    }
-    for (const l of payloadLineas) {
-      if (!Number.isFinite(l.cantidad) || l.cantidad < 1) {
-        setErr(`Cantidad inválida para ${l.codigo || "producto"}.`);
-        return;
-      }
-      if (l.cantidad > l.stockOrigen) {
-        setErr(`La cantidad excede stock disponible para ${l.codigo}.`);
-        return;
-      }
     }
 
     setPending(true);
@@ -177,16 +308,19 @@ export function TraspasoForm({ sucursales }: { sucursales: SucursalOpt[] }) {
           sucursalOrigenId: origenNum,
           sucursalDestinoId: destinoNum,
           nota: nota.trim() || null,
-          lineas: payloadLineas.map((l) => ({ productoId: l.productoId, cantidad: Math.trunc(l.cantidad) })),
+          lineas: payloadLineas,
         }),
       });
       const data = (await res.json()) as { ok?: boolean; referenciaId?: number; error?: string };
       if (!res.ok || !data.ok) {
-        throw new Error(data.error || "No se pudo registrar el traspaso.");
+        throw new Error(data.error ?? "No se pudo registrar el traspaso.");
       }
       setOk(`Traspaso registrado. Referencia #${data.referenciaId}.`);
       setNota("");
-      setLineas([newLine()]);
+      setLineas([]);
+      setCatalogBuscado(false);
+      setCatalogRows([]);
+      setCatalogTotal(0);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "No se pudo registrar el traspaso.");
     } finally {
@@ -194,7 +328,6 @@ export function TraspasoForm({ sucursales }: { sucursales: SucursalOpt[] }) {
     }
   }
 
-  const tablaHeadCls = "border-b border-white/10 bg-black/25 text-xs uppercase tracking-wide text-slate-500";
   const ctrlInp =
     "w-full rounded-lg border border-white/10 bg-slate-900/80 px-3 py-2 text-sm text-white disabled:opacity-50";
 
@@ -203,7 +336,7 @@ export function TraspasoForm({ sucursales }: { sucursales: SucursalOpt[] }) {
       <div className="overflow-x-auto rounded-2xl border border-white/10 bg-slate-900/40">
         <table className="w-full min-w-[720px] text-left text-sm">
           <thead>
-            <tr className={tablaHeadCls}>
+            <tr className="border-b border-white/10 bg-black/25 text-xs uppercase tracking-wide text-slate-500">
               <th className="px-3 py-2.5">Sucursal origen</th>
               <th className="px-3 py-2.5">Sucursal destino</th>
               <th className="min-w-[200px] px-3 py-2.5">Nota (opcional)</th>
@@ -256,242 +389,219 @@ export function TraspasoForm({ sucursales }: { sucursales: SucursalOpt[] }) {
         </table>
       </div>
 
-      <div className="space-y-5 rounded-2xl border border-white/10 bg-slate-900/40 p-4">
-        <div>
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-            <h3 className="text-sm font-semibold text-white">Productos a traspasar</h3>
-            <button
-              type="button"
-              onClick={addLine}
-              className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-white/15 bg-slate-800 px-2.5 py-1.5 text-xs text-white hover:bg-slate-700"
-            >
-              <Plus className="h-3.5 w-3.5" />
-              Agregar fila
-            </button>
-          </div>
-
-        <div className="overflow-x-auto rounded-xl border border-white/10 bg-black/20">
-          <table className="w-full min-w-[980px] text-left text-sm">
-            <thead>
-              <tr className={tablaHeadCls}>
-                <th className="min-w-[220px] px-3 py-2.5">Buscar</th>
-                <th className="min-w-[100px] px-3 py-2.5">Código</th>
-                <th className="min-w-[200px] px-3 py-2.5">Producto</th>
-                <th className="w-24 whitespace-nowrap px-3 py-2.5">Stock origen</th>
-                <th className="w-28 whitespace-nowrap px-3 py-2.5">Cantidad</th>
-                <th className="w-28 whitespace-nowrap px-3 py-2.5">Restante</th>
-                <th className="w-14 px-3 py-2.5">
-                  <span className="sr-only">Quitar</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-white/5">
-              {lineas.map((l) => {
-                const cantTrunc = Math.trunc(Number(l.cantidad));
-                const cantParsed = Number.isFinite(cantTrunc) && cantTrunc > 0 ? cantTrunc : 0;
-                const restante =
-                  l.productoId != null ? l.stockOrigen - cantParsed : null;
-                const restNegativo = restante != null && restante < 0;
-
-                return (
-                  <Fragment key={l.key}>
-                    <tr className="align-top hover:bg-white/[0.02]">
-                      <td className="px-3 py-2.5">
-                        <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-stretch">
-                          <input
-                            type="text"
-                            value={l.query}
-                            onChange={(e) => updateLine(l.key, { query: e.target.value })}
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter") {
-                                e.preventDefault();
-                                void buscarLinea(l.key);
-                              }
-                            }}
-                            placeholder="Código, nombre…"
-                            className="min-w-0 flex-1 rounded-lg border border-white/10 bg-slate-950/80 px-2.5 py-2 text-sm text-white"
-                            disabled={pending}
-                          />
-                          <button
-                            type="button"
-                            onClick={() => buscarLinea(l.key)}
-                            className="inline-flex shrink-0 items-center justify-center gap-1 rounded-lg border border-white/15 bg-slate-800 px-3 py-2 text-xs text-white hover:bg-slate-700 sm:max-w-[7rem]"
-                            disabled={pending || l.buscando}
-                          >
-                            <Search className="h-3.5 w-3.5 shrink-0" />
-                            <span className="hidden sm:inline">{l.buscando ? "…" : "Buscar"}</span>
-                          </button>
-                        </div>
-                      </td>
-                      <td className="px-3 py-2.5 font-mono text-xs text-slate-400">
-                        {l.productoId ? l.codigo : "—"}
-                      </td>
-                      <td className="max-w-[280px] px-3 py-2.5">
-                        <span className="line-clamp-2 text-slate-100" title={l.nombre}>
-                          {l.productoId ? l.nombre : "—"}
-                        </span>
-                      </td>
-                      <td className="px-3 py-2.5 text-emerald-300 tabular-nums">
-                        {l.productoId != null ? l.stockOrigen : "—"}
-                      </td>
-                      <td className="px-3 py-2.5">
-                        <input
-                          type="number"
-                          min={1}
-                          step={1}
-                          className="w-full min-w-[4.5rem] rounded-lg border border-white/10 bg-slate-950/80 px-2 py-1.5 tabular-nums text-sm text-white disabled:opacity-50"
-                          value={l.cantidad}
-                          onChange={(e) => updateLine(l.key, { cantidad: e.target.value })}
-                          disabled={pending || l.productoId == null}
-                        />
-                      </td>
-                      <td
-                        className={`px-3 py-2.5 tabular-nums font-medium ${
-                          restNegativo ? "text-rose-300" : "text-sky-200"
-                        }`}
-                      >
-                        {restante == null ? "—" : restante}
-                      </td>
-                      <td className="px-2 py-2.5 align-top">
-                        <button
-                          type="button"
-                          onClick={() => removeLine(l.key)}
-                          className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-rose-500/30 bg-rose-950/30 text-rose-200 hover:bg-rose-900/40"
-                          title="Quitar fila"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      </td>
-                    </tr>
-                    {l.resultados.length > 0 ? (
-                      <tr className="bg-slate-950/45">
-                        <td className="px-3 pb-3 pt-0" colSpan={7}>
-                          <div className="rounded-lg border border-white/10">
-                            <table className="w-full min-w-[520px] text-left text-sm">
-                              <caption className="border-b border-white/10 px-3 py-2 text-left text-[11px] uppercase tracking-wide text-slate-500">
-                                Resultados de búsqueda — pulsá una fila para usarla
-                              </caption>
-                              <thead>
-                                <tr className={tablaHeadCls}>
-                                  <th className="px-3 py-2">Código</th>
-                                  <th className="px-3 py-2">Producto</th>
-                                  <th className="w-28 whitespace-nowrap px-3 py-2">Stock</th>
-                                  <th className="w-20 px-3 py-2">
-                                    <span className="sr-only">Acción</span>
-                                  </th>
-                                </tr>
-                              </thead>
-                              <tbody className="divide-y divide-white/5">
-                                {l.resultados.map((r) => {
-                                  const seleccionar = (): void =>
-                                    updateLine(l.key, {
-                                      productoId: r.producto_id,
-                                      codigo: r.codigo,
-                                      nombre: r.nombre,
-                                      stockOrigen: r.stock,
-                                      cantidad: "1",
-                                      resultados: [],
-                                      query: `${r.codigo} · ${r.nombre}`,
-                                    });
-                                  return (
-                                    <tr
-                                      key={`${l.key}-${r.producto_id}`}
-                                      tabIndex={0}
-                                      role="button"
-                                      className="cursor-pointer hover:bg-white/[0.06]"
-                                      onClick={seleccionar}
-                                      onKeyDown={(e) => {
-                                        if (e.key === "Enter" || e.key === " ") {
-                                          e.preventDefault();
-                                          seleccionar();
-                                        }
-                                      }}
-                                    >
-                                      <td className="px-3 py-2 font-mono text-xs text-slate-300">{r.codigo}</td>
-                                      <td className="max-w-[360px] px-3 py-2 text-slate-100">{r.nombre}</td>
-                                      <td className="px-3 py-2 tabular-nums text-emerald-300">{r.stock}</td>
-                                      <td className="px-3 py-2 text-right text-[11px] font-medium uppercase tracking-wide text-sky-300/95">
-                                        Usar
-                                      </td>
-                                    </tr>
-                                  );
-                                })}
-                              </tbody>
-                            </table>
-                          </div>
-                        </td>
-                      </tr>
-                    ) : null}
-                  </Fragment>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-
-        <p className="text-xs text-slate-500">
-          Una vez que busques, elegí una fila en la tabla de resultados; la cantidad no puede superar el stock en origen.
+      <section className="rounded-2xl border border-white/10 bg-slate-900/40 p-4">
+        <h3 className="text-sm font-semibold text-white">Agregar con código o QR</h3>
+        <p className="mt-1 text-xs text-slate-500">
+          Misma búsqueda exacta que en productos. Enter o el botón agrega (solo con stock en origen).
         </p>
-        </div>
-
-        <div className="border-t border-white/10 pt-4">
-          <h3 className="text-sm font-semibold text-white">Stock en sucursal origen</h3>
-          <p className="mt-1 text-xs text-slate-500">
-            Referencia rápida antes de cargar líneas (misma sucursal que «Origen»).
-          </p>
-          <div className="mt-2 overflow-x-auto rounded-xl border border-white/10 bg-slate-950/40">
-            <table className="w-full min-w-[620px] text-left text-sm">
-              <thead>
-                <tr className={tablaHeadCls}>
-                  <th className="px-3 py-2">Código</th>
-                  <th className="px-3 py-2">Producto</th>
-                  <th className="px-3 py-2">Stock</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-white/5">
-                {stockOrigenLoading ? (
-                  <tr>
-                    <td className="px-3 py-4 text-slate-500" colSpan={3}>
-                      Cargando stock…
-                    </td>
-                  </tr>
-                ) : stockOrigenRows.length === 0 ? (
-                  <tr>
-                    <td className="px-3 py-4 text-slate-500" colSpan={3}>
-                      Sin stock disponible o elegí sucursal origen.
-                    </td>
-                  </tr>
-                ) : (
-                  stockOrigenRows.map((r) => (
-                    <tr key={`stock-${r.producto_id}`} className="hover:bg-white/[0.02]">
-                      <td className="px-3 py-2 font-mono text-slate-300">{r.codigo}</td>
-                      <td className="max-w-[360px] truncate px-3 py-2 text-white">{r.nombre}</td>
-                      <td className="px-3 py-2 tabular-nums text-emerald-300">{r.stock}</td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
+        <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-stretch">
+          <div className="relative min-w-0 flex-1">
+            <ScanLine
+              className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-sky-400/70"
+              aria-hidden
+            />
+            <input
+              className={`${ctrlInp} pl-9`}
+              value={codigoBuscar}
+              onChange={(e) => setCodigoBuscar(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  void buscarPorCodigo();
+                }
+              }}
+              placeholder="Código interno o QR…"
+              disabled={pending || !sucursalOrigenId}
+            />
           </div>
+          <button
+            type="button"
+            disabled={pending || buscandoCodigo || !codigoBuscar.trim() || !sucursalOrigenId}
+            onClick={() => void buscarPorCodigo()}
+            className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-500 disabled:opacity-50"
+          >
+            {buscandoCodigo ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+            Agregar
+          </button>
         </div>
+      </section>
 
-        <div className="space-y-3 border-t border-white/10 pt-4">
-          {err ? (
-            <p className="rounded-lg border border-rose-500/40 bg-rose-950/30 px-3 py-2 text-sm text-rose-200">{err}</p>
-          ) : null}
-          {ok ? (
-            <p className="rounded-lg border border-emerald-500/40 bg-emerald-950/30 px-3 py-2 text-sm text-emerald-200">{ok}</p>
-          ) : null}
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="submit"
-              disabled={pending || !puedeEnviar}
-              className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"
+      <section className="space-y-3">
+        <button
+          type="button"
+          onClick={() => setCatalogoExpandido((v) => !v)}
+          className="flex w-full items-center justify-between gap-3 rounded-xl border border-white/10 bg-slate-950/50 px-4 py-3 text-left hover:border-sky-500/30"
+        >
+          <div>
+            <p className="text-sm font-semibold text-white">Catálogo de productos</p>
+            <p className="mt-0.5 text-xs text-slate-500">
+              Misma tabla que en Admin → Productos; la columna de origen queda resaltada.
+            </p>
+          </div>
+          {catalogoExpandido ? (
+            <ChevronUp className="h-5 w-5 text-slate-500" />
+          ) : (
+            <ChevronDown className="h-5 w-5 text-slate-500" />
+          )}
+        </button>
+
+        {catalogoExpandido ? (
+          <div className="space-y-4 rounded-2xl border border-white/10 bg-slate-900/40 p-4">
+            <p className="text-xs text-slate-500">En cualquier filtro de abajo, Enter ejecuta la búsqueda en catálogo.</p>
+            <div
+              className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5"
+              onKeyDown={onCatalogFilterKeyDown}
             >
-              {pending ? "Registrando…" : "Registrar traspaso"}
-            </button>
+              <div className="max-w-full sm:max-w-md lg:col-span-2">
+                <label className="text-[9px] font-semibold uppercase tracking-wide text-slate-500">
+                  Buscar (todo)
+                </label>
+                <input
+                  value={q}
+                  onChange={(e) => setQ(e.target.value)}
+                  placeholder="QR, código pieza, nombre…"
+                  className={`${inpBuscarTodo} mt-1`}
+                  autoComplete="off"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Código</label>
+                <input value={codigo} onChange={(e) => setCodigo(e.target.value)} className={`${inp} mt-1 font-mono`} autoComplete="off" />
+              </div>
+              <div>
+                <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Cód. pieza</label>
+                <input value={codigoPieza} onChange={(e) => setCodigoPieza(e.target.value)} className={`${inp} mt-1`} autoComplete="off" />
+              </div>
+              <div>
+                <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Especificación</label>
+                <input value={especificacion} onChange={(e) => setEspecificacion(e.target.value)} className={`${inp} mt-1`} autoComplete="off" />
+              </div>
+              <div>
+                <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Medida</label>
+                <input value={medida} onChange={(e) => setMedida(e.target.value)} className={`${inp} mt-1`} autoComplete="off" />
+              </div>
+              <div>
+                <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Descripción</label>
+                <input value={descripcion} onChange={(e) => setDescripcion(e.target.value)} className={`${inp} mt-1`} autoComplete="off" />
+              </div>
+              <div>
+                <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Repuesto</label>
+                <input value={repuesto} onChange={(e) => setRepuesto(e.target.value)} className={`${inp} mt-1`} autoComplete="off" />
+              </div>
+              <div>
+                <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Máx. filas</label>
+                <input
+                  value={perPage}
+                  onChange={(e) => setPerPage(e.target.value)}
+                  inputMode="numeric"
+                  className={`${inp} mt-1 font-mono`}
+                />
+              </div>
+            </div>
+
+            <label className="flex cursor-pointer items-center gap-2 text-xs text-slate-400">
+              <input
+                type="checkbox"
+                checked={soloConStockEnOrigen}
+                onChange={(e) => setSoloConStockEnOrigen(e.target.checked)}
+                className="rounded border-white/20"
+              />
+              Solo productos con stock en la sucursal origen
+            </label>
+
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                disabled={catalogLoading || !sucursalOrigenId}
+                onClick={() => void ejecutarBusquedaCatalogo()}
+                className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-500 disabled:opacity-50"
+              >
+                {catalogLoading ? "Buscando…" : "Buscar en catálogo"}
+              </button>
+              <button
+                type="button"
+                className="rounded-lg border border-white/15 px-4 py-2 text-sm text-slate-300 hover:bg-white/5"
+                onClick={() => {
+                  setQ("");
+                  setCodigo("");
+                  setCodigoPieza("");
+                  setEspecificacion("");
+                  setMedida("");
+                  setDescripcion("");
+                  setRepuesto("");
+                  setSoloConStockEnOrigen(true);
+                  setPerPage(String(CATALOGO_FILAS_DEFAULT));
+                }}
+              >
+                Limpiar filtros
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-500">
+              {catalogLoading
+                ? "Consultando…"
+                : !catalogBuscado
+                  ? "Elegí origen, filtros y pulsá «Buscar en catálogo»."
+                  : catalogTotal === 0
+                    ? "Sin resultados con estos criterios."
+                    : `Mostrando ${catalogRows.length} de ${catalogTotal} producto(s).`}
+            </p>
+
+            {catalogLoading && catalogRows.length === 0 ? (
+              <div className="flex items-center justify-center gap-2 py-12 text-sm text-slate-500">
+                <Loader2 className="h-6 w-6 animate-spin text-sky-500" />
+                Cargando catálogo…
+              </div>
+            ) : catalogBuscado ? (
+              <ProductosCatalogoTabla
+                rows={catalogRows}
+                sucursales={sucursales}
+                modoAccion="agregar"
+                sucursalReferenciaId={origenNum > 0 ? origenNum : null}
+                onAgregar={agregarProducto}
+                idsEnCarrito={idsEnCarrito}
+              />
+            ) : null}
           </div>
-        </div>
+        ) : null}
+      </section>
+
+      <section className="space-y-3 rounded-2xl border border-white/10 bg-slate-900/40 p-4">
+        <h3 className="text-sm font-semibold text-white">Líneas del traspaso</h3>
+        <p className="text-xs text-slate-500">
+          Ajustá cantidades; «Restante» no puede quedar negativo (no supera el stock en origen).
+        </p>
+        <TraspasoLineasTabla
+          lineas={lineas}
+          onCantidadChange={(key, value) =>
+            setLineas((prev) => prev.map((l) => (l.key === key ? { ...l, cantidad: value } : l)))
+          }
+          onCantidadBlur={(key) =>
+            setLineas((prev) =>
+              prev.map((l) =>
+                l.key === key ? { ...l, cantidad: snapCantidadTraspaso(l.cantidad, l.stockOrigen) } : l
+              )
+            )
+          }
+          onRemove={(key) => setLineas((prev) => prev.filter((l) => l.key !== key))}
+        />
+      </section>
+
+      <div className="space-y-3">
+        {err ? (
+          <p className="rounded-lg border border-rose-500/40 bg-rose-950/30 px-3 py-2 text-sm text-rose-200">{err}</p>
+        ) : null}
+        {ok ? (
+          <p className="rounded-lg border border-emerald-500/40 bg-emerald-950/30 px-3 py-2 text-sm text-emerald-200">{ok}</p>
+        ) : null}
+        <button
+          type="submit"
+          disabled={pending || !puedeEnviar}
+          className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {pending ? "Registrando…" : "Registrar traspaso"}
+        </button>
       </div>
     </form>
   );

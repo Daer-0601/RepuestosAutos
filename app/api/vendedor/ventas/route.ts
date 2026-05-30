@@ -97,10 +97,18 @@ export async function POST(request: Request) {
   const tipoCambioSnapshot =
     Number.isFinite(tcBodyVal) && tcBodyVal > 0 ? tcBodyVal : ultimo.valor_bs_por_usd;
 
+  const esCredito = Boolean(b.esCredito ?? b.es_credito);
   const clienteNombreLibreRaw = typeof b.clienteNombreLibre === "string" ? b.clienteNombreLibre.trim() : "";
   const clienteNitRaw = typeof b.clienteNit === "string" ? b.clienteNit.trim() : "";
-  const clienteNombreLibre = clienteNombreLibreRaw ? clienteNombreLibreRaw.slice(0, 255) : null;
-  const clienteNit = clienteNitRaw ? clienteNitRaw.slice(0, 64) : null;
+  const clienteNombreLibre = esCredito ? null : clienteNombreLibreRaw ? clienteNombreLibreRaw.slice(0, 255) : null;
+  const clienteNit = esCredito ? null : clienteNitRaw ? clienteNitRaw.slice(0, 64) : null;
+
+  if (esCredito && (clienteId === null || !Number.isFinite(clienteId) || clienteId < 1)) {
+    return NextResponse.json(
+      { error: "Las ventas a crédito requieren elegir un cliente registrado." },
+      { status: 400 }
+    );
+  }
 
   const result = await registrarVentaVendedor({
     usuarioId: ctx.userId,
@@ -110,11 +118,12 @@ export async function POST(request: Request) {
     tipoCambioSnapshot,
     numeroDocumento:
       typeof b.numeroDocumento === "string" && b.numeroDocumento.trim() ? b.numeroDocumento.trim() : null,
-    tipoNota: "proforma_1",
+    tipoNota: esCredito ? "nota_entrega" : "proforma_1",
     clienteNombreLibre,
     clienteNit,
     lineas,
     creditoFechaLimite: null,
+    esCredito,
     enviarACaja: true,
     cajeroDestinoUsuarioId: Math.trunc(cajeroDestinoUsuarioId),
   });
@@ -127,6 +136,8 @@ export async function POST(request: Request) {
   revalidatePath("/vendedor/ventas/nueva");
   revalidatePath("/vendedor");
   revalidatePath("/cajero/cobros");
+  revalidatePath("/cajero/reportes/creditos");
+  revalidatePath("/vendedor/creditos");
   revalidatePath("/admin/reportes");
 
   return NextResponse.json({ ventaId: result.ventaId });

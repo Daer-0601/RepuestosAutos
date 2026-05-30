@@ -1,6 +1,9 @@
 "use client";
 
+import { VentaDetalleProductosTabla } from "@/app/vendedor/_components/venta-detalle-productos-tabla";
 import { formatDateTimeMysqlBolivia, formatoMostrarFechaHoraBo } from "@/lib/fecha-bolivia";
+import type { VentaDetalleProductoRow } from "@/lib/data/ventas-vendedor";
+import { openNotaEntregaPrint } from "@/lib/reportes/nota-entrega-html";
 import { CheckCircle2, Loader2, RefreshCw, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
@@ -8,6 +11,7 @@ type VentaPendiente = {
   id: number;
   fecha: string;
   totalBs: number;
+  tipoPago?: string;
   clienteNombre: string | null;
   clienteNit: string | null;
   vendedorNombre: string;
@@ -19,17 +23,11 @@ type VentaDetalle = {
   id: number;
   fecha: string;
   totalBs: number;
+  tipoPago?: string;
   clienteNombre: string | null;
   clienteNit: string | null;
   vendedorNombre: string;
-  lineas: {
-    codigo: string;
-    nombre: string;
-    medida: string | null;
-    cantidad: number;
-    precioUnitarioBs: number;
-    totalLineaBs: number;
-  }[];
+  lineas: VentaDetalleProductoRow[];
 };
 
 function labelPago(tipo: "efectivo" | "qr" | "tarjeta"): string {
@@ -96,7 +94,7 @@ function buildNotaVentaHtml(input: {
     .map(
       (ln) => `<tr>
       <td class="mono">${escHtml(ln.codigo)}</td>
-      <td>${escHtml(ln.nombre)}${ln.medida ? ` <span class="muted">(${escHtml(ln.medida)})</span>` : ""}</td>
+      <td>${escHtml(ln.nombre)}${ln.medida && ln.medida !== "—" ? ` <span class="muted">(${escHtml(ln.medida)})</span>` : ""}</td>
       <td class="num mono">${ln.cantidad}</td>
       <td class="num mono">${ln.precioUnitarioBs.toFixed(2)}</td>
       <td class="num mono">${ln.totalLineaBs.toFixed(2)}</td>
@@ -179,7 +177,11 @@ export function CobrosVendedorPanel({
   const [detalleLoading, setDetalleLoading] = useState(false);
   const [tipoPago, setTipoPago] = useState<"efectivo" | "qr" | "tarjeta">("efectivo");
   const [cobrando, setCobrando] = useState(false);
+  const [entregando, setEntregando] = useState(false);
+  const [observacionCredito, setObservacionCredito] = useState("");
   const [msg, setMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
+
+  const esCreditoPendiente = detalle?.tipoPago === "credito";
 
   const cargarLista = useCallback(async (opts?: { silent?: boolean }) => {
     const silent = opts?.silent === true;
@@ -269,8 +271,45 @@ export function CobrosVendedorPanel({
     }
   }, []);
 
-  async function confirmarCobro() {
+  async function confirmarEntregaCredito() {
     if (!detalle) return;
+    setEntregando(true);
+    setMsg(null);
+    try {
+      const res = await fetch("/api/cajero/ventas-pendientes/entregar-credito", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ventaId: detalle.id,
+          observacion: observacionCredito.trim() || null,
+        }),
+      });
+      const data = (await res.json()) as { error?: string; nota?: Parameters<typeof openNotaEntregaPrint>[0] };
+      if (!res.ok) {
+        setMsg({ type: "err", text: data.error ?? "No se pudo registrar la entrega." });
+        return;
+      }
+      if (data.nota) {
+        const pr = openNotaEntregaPrint(data.nota);
+        if (!pr.ok) setMsg({ type: "err", text: pr.message });
+      }
+      setMsg({
+        type: "ok",
+        text: `Venta #${detalle.id} entregada a crédito. Pago único en caja dentro de 1 mes. Imprimí la Nota de entrega.`,
+      });
+      setDetalleId(null);
+      setDetalle(null);
+      setObservacionCredito("");
+      void cargarLista();
+    } catch {
+      setMsg({ type: "err", text: "Error de red al entregar." });
+    } finally {
+      setEntregando(false);
+    }
+  }
+
+  async function confirmarCobro() {
+    if (!detalle || esCreditoPendiente) return;
     setCobrando(true);
     setMsg(null);
     try {
@@ -441,12 +480,21 @@ export function CobrosVendedorPanel({
                     {r.totalBs.toFixed(2)}
                   </td>
                   <td className="px-4 py-3 text-right">
+                    {r.tipoPago === "credito" ? (
+                      <span className="mr-2 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] text-amber-200">
+                        Crédito
+                      </span>
+                    ) : null}
                     <button
                       type="button"
                       onClick={() => void abrirDetalle(r.id)}
-                      className="inline-flex rounded-lg bg-emerald-500/15 px-3 py-1.5 text-xs font-medium text-emerald-100 ring-1 ring-emerald-500/30 hover:bg-emerald-500/25"
+                      className={`inline-flex rounded-lg px-3 py-1.5 text-xs font-medium ring-1 ${
+                        r.tipoPago === "credito"
+                          ? "bg-amber-500/15 text-amber-100 ring-amber-500/30 hover:bg-amber-500/25"
+                          : "bg-emerald-500/15 text-emerald-100 ring-emerald-500/30 hover:bg-emerald-500/25"
+                      }`}
                     >
-                      Cobrar
+                      {r.tipoPago === "credito" ? "Entregar" : "Cobrar"}
                     </button>
                   </td>
                 </tr>
@@ -467,7 +515,7 @@ export function CobrosVendedorPanel({
             <div className="flex items-start justify-between gap-4 border-b border-white/10 bg-emerald-950/20 px-5 py-4 sm:px-6 sm:py-5">
               <div className="min-w-0">
                 <h2 id="cobro-venta-titulo" className="text-xl font-semibold tracking-tight text-white sm:text-2xl">
-                  Cobrar venta #{detalleId}
+                  {esCreditoPendiente ? `Entregar crédito #${detalleId}` : `Cobrar venta #${detalleId}`}
                 </h2>
                 {detalle ? (
                   <div className="mt-2 space-y-1 text-sm text-slate-300 sm:text-base">
@@ -506,42 +554,15 @@ export function CobrosVendedorPanel({
                 </div>
               ) : (
                 <>
-                  <p className="mb-3 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-                    {detalle.lineas.length} producto{detalle.lineas.length === 1 ? "" : "s"}
+                  <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                    Productos ({detalle.lineas.length})
                   </p>
-                  <ul className="space-y-3">
-                    {detalle.lineas.map((ln, i) => (
-                      <li
-                        key={`${ln.codigo}-${i}`}
-                        className="rounded-xl border border-white/10 bg-slate-900/50 p-4 sm:p-5"
-                      >
-                        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                          <div className="min-w-0 flex-1">
-                            <p className="font-mono text-sm font-medium text-emerald-300/90 sm:text-base">{ln.codigo}</p>
-                            <p className="mt-1.5 text-base font-medium leading-snug text-white sm:text-lg">{ln.nombre}</p>
-                            {ln.medida ? (
-                              <p className="mt-1 text-sm leading-relaxed text-slate-400 sm:text-base">{ln.medida}</p>
-                            ) : null}
-                          </div>
-                          <div className="flex shrink-0 flex-row items-end justify-between gap-6 border-t border-white/10 pt-3 sm:flex-col sm:items-end sm:border-t-0 sm:pt-0 sm:text-right">
-                            <div className="text-sm text-slate-400 sm:text-base">
-                              <span className="tabular-nums text-slate-200">{ln.cantidad}</span>
-                              <span className="mx-1.5 text-slate-600">×</span>
-                              <span className="font-mono tabular-nums text-slate-300">
-                                {ln.precioUnitarioBs.toFixed(2)} Bs
-                              </span>
-                            </div>
-                            <p className="font-mono text-lg font-semibold tabular-nums text-slate-100 sm:text-xl">
-                              {ln.totalLineaBs.toFixed(2)} Bs
-                            </p>
-                          </div>
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
+                  <VentaDetalleProductosTabla lineas={detalle.lineas} />
 
-                  <div className="mt-6 rounded-xl border border-emerald-500/30 bg-gradient-to-r from-emerald-950/50 to-slate-950/50 px-5 py-4 sm:px-6 sm:py-5">
-                    <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Total a cobrar</p>
+                  <div className="mt-4 rounded-xl border border-emerald-500/30 bg-gradient-to-r from-emerald-950/50 to-slate-950/50 px-5 py-4 sm:px-6">
+                    <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                      {esCreditoPendiente ? "Total del crédito (un solo pago en caja después)" : "Total a cobrar"}
+                    </p>
                     <p className="mt-1 font-mono text-3xl font-bold tabular-nums text-emerald-50 sm:text-4xl">
                       {detalle.totalBs.toFixed(2)}{" "}
                       <span className="text-lg font-normal text-slate-400 sm:text-xl">Bs</span>
@@ -553,33 +574,64 @@ export function CobrosVendedorPanel({
 
             {detalle ? (
               <div className="flex flex-col gap-4 border-t border-white/10 bg-slate-900/40 px-5 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-6">
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
-                  <label
-                    htmlFor="cobro-tipo-pago"
-                    className="text-sm font-semibold uppercase tracking-wide text-slate-400"
-                  >
-                    Forma de pago
-                  </label>
-                  <select
-                    id="cobro-tipo-pago"
-                    className="min-w-[11rem] rounded-xl border border-white/15 bg-slate-900 px-4 py-3 text-base text-white outline-none focus:border-emerald-500/40"
-                    value={tipoPago}
-                    onChange={(e) => setTipoPago(e.target.value as typeof tipoPago)}
-                  >
-                    <option value="efectivo">Efectivo</option>
-                    <option value="qr">QR</option>
-                    <option value="tarjeta">Tarjeta</option>
-                  </select>
-                </div>
-                <button
-                  type="button"
-                  disabled={cobrando}
-                  onClick={() => void confirmarCobro()}
-                  className="inline-flex w-full items-center justify-center gap-2.5 rounded-xl bg-emerald-500 px-6 py-3.5 text-base font-semibold text-slate-950 shadow-lg shadow-emerald-900/30 transition hover:bg-emerald-400 disabled:opacity-50 sm:w-auto sm:min-w-[220px]"
-                >
-                  {cobrando ? <Loader2 className="h-5 w-5 animate-spin" /> : <CheckCircle2 className="h-5 w-5" />}
-                  Confirmar cobro
-                </button>
+                {esCreditoPendiente ? (
+                  <>
+                    <div className="min-w-0 flex-1">
+                      <label htmlFor="obs-credito" className="text-xs font-semibold uppercase text-slate-500">
+                        Observación (nota de entrega)
+                      </label>
+                      <input
+                        id="obs-credito"
+                        value={observacionCredito}
+                        onChange={(e) => setObservacionCredito(e.target.value)}
+                        placeholder="Ej. nombre de quien recibe"
+                        className="mt-1 w-full max-w-md rounded-xl border border-white/15 bg-slate-900 px-3 py-2 text-sm text-white"
+                      />
+                      <p className="mt-2 text-xs text-amber-200/80">
+                        Al confirmar se imprime la Nota de entrega. El cliente tiene 1 mes para pagar en Créditos.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={entregando}
+                      onClick={() => void confirmarEntregaCredito()}
+                      className="inline-flex w-full items-center justify-center gap-2.5 rounded-xl bg-amber-500 px-6 py-3.5 text-base font-semibold text-slate-950 shadow-lg transition hover:bg-amber-400 disabled:opacity-50 sm:w-auto sm:min-w-[220px]"
+                    >
+                      {entregando ? <Loader2 className="h-5 w-5 animate-spin" /> : <CheckCircle2 className="h-5 w-5" />}
+                      Entregar e imprimir
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+                      <label
+                        htmlFor="cobro-tipo-pago"
+                        className="text-sm font-semibold uppercase tracking-wide text-slate-400"
+                      >
+                        Forma de pago
+                      </label>
+                      <select
+                        id="cobro-tipo-pago"
+                        className="min-w-[11rem] rounded-xl border border-white/15 bg-slate-900 px-4 py-3 text-base text-white outline-none focus:border-emerald-500/40"
+                        value={tipoPago}
+                        onChange={(e) => setTipoPago(e.target.value as typeof tipoPago)}
+                      >
+                        <option value="efectivo">Efectivo</option>
+                        <option value="qr">QR</option>
+                        <option value="tarjeta">Tarjeta</option>
+                      </select>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={cobrando}
+                      onClick={() => void confirmarCobro()}
+                      className="inline-flex w-full items-center justify-center gap-2.5 rounded-xl bg-emerald-500 px-6 py-3.5 text-base font-semibold text-slate-950 shadow-lg shadow-emerald-900/30 transition hover:bg-emerald-400 disabled:opacity-50 sm:w-auto sm:min-w-[220px]"
+                    >
+                      {cobrando ? <Loader2 className="h-5 w-5 animate-spin" /> : <CheckCircle2 className="h-5 w-5" />}
+                      Confirmar cobro
+                    </button>
+                  </>
+                )}
               </div>
             ) : null}
           </div>

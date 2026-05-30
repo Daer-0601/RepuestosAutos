@@ -1,8 +1,18 @@
 "use client";
 
-import { formatoMostrarFechaBo, formatoMostrarFechaHoraBo } from "@/lib/fecha-bolivia";
+import { formatoMostrarFechaHoraBo } from "@/lib/fecha-bolivia";
+import {
+  buildReporteArqueoResumenHtml,
+  openReporteArqueoResumenPrint,
+} from "@/lib/reportes/reporte-arqueo-resumen-html";
+import {
+  buildReporteSalidasDiariasHtml,
+  labelPeriodoSalidas,
+  openReporteSalidasDiariasPrint,
+  type SalidasDiariasPrintLinea,
+} from "@/lib/reportes/reporte-salidas-diarias-html";
 import { Loader2, Printer, RefreshCw } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type ArqueoFila = {
   usuarioId: number;
@@ -25,39 +35,40 @@ function round4(n: number) {
   return Math.round(n * 1e4) / 1e4;
 }
 
-function escHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+type SalidasApiLinea = SalidasDiariasPrintLinea;
+
+function totalesDesdeFilas(filas: ArqueoFila[]) {
+  let ventas = 0;
+  let bs = 0;
+  let usd = 0;
+  let ef = 0;
+  let qr = 0;
+  let tar = 0;
+  let cred = 0;
+  for (const f of filas) {
+    ventas += f.cantidadVentas;
+    bs = round2(bs + f.totalBs);
+    usd = round4(usd + f.totalUsd);
+    ef = round2(ef + f.bsEfectivo);
+    qr = round2(qr + f.bsQr);
+    tar = round2(tar + f.bsTarjeta);
+    cred = round2(cred + f.bsCredito);
+  }
+  return { ventas, bs, usd, ef, qr, tar, cred };
 }
 
-type SalidasDocLinea = {
-  fecha: string;
-  ventaId: number;
-  numeroDocumento: string | null;
-  codigo: string;
-  codigoPieza: string;
-  medida: string;
-  descripcion: string;
-  cantidad: number;
-  totalLineaBs: number;
-};
-
-function formatFechaCelda(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleDateString("es-BO", formatoMostrarFechaBo);
-}
-
-/** Convierte YYYY-MM-DD a fecha corta es-BO (evita desfase UTC en solo-fecha). */
-function labelPeriodoRango(d1: string, d2: string): string {
-  const fmt = (d: string) =>
-    /^\d{4}-\d{2}-\d{2}$/.test(d) ? formatFechaCelda(`${d}T12:00:00`) : d.trim() || "—";
-  const a = fmt(d1);
-  const b = fmt(d2);
-  return d1 === d2 ? a : `${a} al ${b}`;
+function mapLineasPrint(lineas: SalidasApiLinea[]): SalidasDiariasPrintLinea[] {
+  return lineas.map((ln) => ({
+    fecha: ln.fecha,
+    vendedorNombre: ln.vendedorNombre,
+    codigoInterno: ln.codigoInterno,
+    codigoPieza: ln.codigoPieza,
+    medida: ln.medida,
+    descripcion: ln.descripcion,
+    cantidad: ln.cantidad,
+    totalLineaBs: ln.totalLineaBs,
+    totalLineaUsd: ln.totalLineaUsd,
+  }));
 }
 
 export function ArqueoVendedoresPanel({
@@ -72,16 +83,20 @@ export function ArqueoVendedoresPanel({
   const [docPrintErr, setDocPrintErr] = useState<string | null>(null);
   const [printingUsuarioId, setPrintingUsuarioId] = useState<number | null>(null);
   const [printingResumen, setPrintingResumen] = useState(false);
+  const [printingSalidasGeneral, setPrintingSalidasGeneral] = useState(false);
   const [sucursalNombre, setSucursalNombre] = useState("");
   const [filas, setFilas] = useState<ArqueoFila[]>([]);
+  const cargarSeqRef = useRef(0);
 
   const cargar = useCallback(async () => {
+    const seq = ++cargarSeqRef.current;
     setLoading(true);
     setErr(null);
     try {
       const q = new URLSearchParams({
         desde: fechaDesde.trim(),
         hasta: fechaHasta.trim(),
+        _t: String(Date.now()),
       });
       const res = await fetch(`/api/cajero/arqueo-vendedores?${q}`, { cache: "no-store" });
       const data = (await res.json()) as {
@@ -89,6 +104,7 @@ export function ArqueoVendedoresPanel({
         sucursalNombre?: string;
         filas?: ArqueoFila[];
       };
+      if (seq !== cargarSeqRef.current) return;
       if (!res.ok) {
         setFilas([]);
         setErr(data.error ?? "No se pudo cargar el arqueo.");
@@ -97,10 +113,11 @@ export function ArqueoVendedoresPanel({
       setSucursalNombre(data.sucursalNombre?.trim() ?? "");
       setFilas(Array.isArray(data.filas) ? data.filas : []);
     } catch {
+      if (seq !== cargarSeqRef.current) return;
       setFilas([]);
       setErr("Error de red.");
     } finally {
-      setLoading(false);
+      if (seq === cargarSeqRef.current) setLoading(false);
     }
   }, [fechaDesde, fechaHasta]);
 
@@ -108,179 +125,111 @@ export function ArqueoVendedoresPanel({
     void cargar();
   }, [cargar]);
 
-  const totales = useMemo(() => {
-    let ventas = 0;
-    let bs = 0;
-    let usd = 0;
-    let ef = 0;
-    let qr = 0;
-    let tar = 0;
-    let cred = 0;
-    for (const f of filas) {
-      ventas += f.cantidadVentas;
-      bs = round2(bs + f.totalBs);
-      usd = round4(usd + f.totalUsd);
-      ef = round2(ef + f.bsEfectivo);
-      qr = round2(qr + f.bsQr);
-      tar = round2(tar + f.bsTarjeta);
-      cred = round2(cred + f.bsCredito);
-    }
-    return { ventas, bs, usd, ef, qr, tar, cred };
-  }, [filas]);
+  const totales = useMemo(() => totalesDesdeFilas(filas), [filas]);
 
-  const imprimirResumenGeneralCaja = useCallback(() => {
+  const imprimirResumenGeneralCaja = useCallback(async () => {
     if (typeof document === "undefined") return;
     setDocPrintErr(null);
     setPrintingResumen(true);
     try {
-      const fechaImp = new Date().toLocaleString("es-BO", formatoMostrarFechaHoraBo);
-      const origin = globalThis.window?.location?.origin ?? "";
-      const logoSrc = escHtml(`${origin}/img/logo.png`);
-      const tienda = escHtml(sucursalNombre ? `Caja · ${sucursalNombre}` : "Caja");
-      const per = escHtml(`Período: ${labelPeriodoRango(fechaDesde, fechaHasta)}`);
-      const titulo = escHtml("ARQUEO GENERAL — RESUMEN POR VENDEDOR");
-      const fi = escHtml(fechaImp);
-      const t = totales;
-
-      const bodyRows =
-        filas.length === 0
-          ? `<tr><td colspan="9" style="padding:14px;border:1px solid #ccc;text-align:center;color:#666">No hay vendedores activos en esta sucursal.</td></tr>`
-          : filas
-              .map(
-                (f) => `<tr>
-            <td style="padding:7px 9px;border:1px solid #ccc">${escHtml(f.nombreCompleto)}</td>
-            <td style="padding:7px 9px;border:1px solid #ccc;font-family:ui-monospace,monospace;font-size:10px">${escHtml(f.username)}</td>
-            <td style="padding:7px 9px;border:1px solid #ccc;text-align:right;font-variant-numeric:tabular-nums">${f.cantidadVentas}</td>
-            <td style="padding:7px 9px;border:1px solid #ccc;text-align:right;font-variant-numeric:tabular-nums">${round2(f.totalBs).toFixed(2)}</td>
-            <td style="padding:7px 9px;border:1px solid #ccc;text-align:right;font-variant-numeric:tabular-nums">${round4(f.totalUsd).toFixed(4)}</td>
-            <td style="padding:7px 9px;border:1px solid #ccc;text-align:right;font-variant-numeric:tabular-nums">${round2(f.bsEfectivo).toFixed(2)}</td>
-            <td style="padding:7px 9px;border:1px solid #ccc;text-align:right;font-variant-numeric:tabular-nums">${round2(f.bsQr).toFixed(2)}</td>
-            <td style="padding:7px 9px;border:1px solid #ccc;text-align:right;font-variant-numeric:tabular-nums">${round2(f.bsTarjeta).toFixed(2)}</td>
-            <td style="padding:7px 9px;border:1px solid #ccc;text-align:right;font-variant-numeric:tabular-nums">${round2(f.bsCredito).toFixed(2)}</td>
-          </tr>`
-              )
-              .join("");
-
-      const footRow =
-        filas.length === 0
-          ? ""
-          : `<tr style="font-weight:700;background:#e5e7eb">
-            <td style="padding:8px 10px;border:1px solid #999" colspan="2">TOTAL GENERAL (sucursal)</td>
-            <td style="padding:8px 10px;border:1px solid #999;text-align:right;font-variant-numeric:tabular-nums">${t.ventas}</td>
-            <td style="padding:8px 10px;border:1px solid #999;text-align:right;font-variant-numeric:tabular-nums">${t.bs.toFixed(2)}</td>
-            <td style="padding:8px 10px;border:1px solid #999;text-align:right;font-variant-numeric:tabular-nums">${t.usd.toFixed(4)}</td>
-            <td style="padding:8px 10px;border:1px solid #999;text-align:right;font-variant-numeric:tabular-nums">${t.ef.toFixed(2)}</td>
-            <td style="padding:8px 10px;border:1px solid #999;text-align:right;font-variant-numeric:tabular-nums">${t.qr.toFixed(2)}</td>
-            <td style="padding:8px 10px;border:1px solid #999;text-align:right;font-variant-numeric:tabular-nums">${t.tar.toFixed(2)}</td>
-            <td style="padding:8px 10px;border:1px solid #999;text-align:right;font-variant-numeric:tabular-nums">${t.cred.toFixed(2)}</td>
-          </tr>`;
-
-      const docHtml = `<!DOCTYPE html>
-<html lang="es">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>${titulo}</title>
-  <style>
-    * { box-sizing: border-box; }
-    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 0; padding: 16px 18px; color: #111; font-size: 12px; line-height: 1.4; }
-    .head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 12px; border-bottom: 2px solid #111; padding-bottom: 10px; }
-    .head-mid { flex: 1; text-align: center; }
-    .marca { font-size: 13px; font-weight: 700; margin-bottom: 4px; }
-    .titulo { font-size: 15px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.03em; }
-    .sub { margin-top: 6px; font-size: 11px; }
-    .nota { margin-top: 10px; font-size: 10px; color: #444; }
-    .logo { width: 72px; height: 52px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; border: 1px solid #ccc; background: #fafafa; }
-    .logo img { max-width: 100%; max-height: 100%; object-fit: contain; }
-    table.items { width: 100%; border-collapse: collapse; margin-top: 10px; }
-    table.items th { background: #e5e7eb; font-weight: 700; text-align: left; padding: 8px 9px; border: 1px solid #999; font-size: 10px; text-transform: uppercase; letter-spacing: 0.03em; }
-    table.items th.num { text-align: right; }
-    table.items td { font-size: 11px; }
-    .foot { display: flex; justify-content: space-between; margin-top: 14px; font-size: 10px; color: #333; }
-    @media print {
-      @page { size: A4 landscape; margin: 10mm; }
-      body { padding: 0; font-size: 11px; }
-      table.items th, table.items td { padding: 6px 7px; }
-    }
-  </style>
-</head>
-<body>
-  <header class="head">
-    <div class="logo"><img src="${logoSrc}" alt="" /></div>
-    <div class="head-mid">
-      <div class="marca">Repuestos</div>
-      <div class="titulo">${titulo}</div>
-      <div class="sub">${tienda}</div>
-      <div class="sub">${per}</div>
-    </div>
-    <div style="width:72px"></div>
-  </header>
-  <p class="nota">Ventas confirmadas en el período. Una fila por vendedor activo de la sucursal; la última fila suma todos los montos.</p>
-  <table class="items">
-    <thead>
-      <tr>
-        <th>Vendedor</th>
-        <th>Usuario</th>
-        <th class="num">Nº ventas</th>
-        <th class="num">Total Bs</th>
-        <th class="num">Total USD</th>
-        <th class="num">Efectivo Bs</th>
-        <th class="num">QR Bs</th>
-        <th class="num">Tarjeta Bs</th>
-        <th class="num">Crédito Bs</th>
-      </tr>
-    </thead>
-    <tbody>${bodyRows}</tbody>
-    ${footRow ? `<tfoot>${footRow}</tfoot>` : ""}
-  </table>
-  <footer class="foot">
-    <span>${fi}</span>
-    <span>Página 1 de 1</span>
-  </footer>
-</body>
-</html>`;
-
-      const blob = new Blob([docHtml], { type: "text/html;charset=utf-8" });
-      const objectUrl = URL.createObjectURL(blob);
-      const w = globalThis.window?.open(objectUrl, "_blank");
-      if (!w) {
-        URL.revokeObjectURL(objectUrl);
-        setDocPrintErr("No se pudo abrir la ventana de impresión (¿bloqueador de ventanas?).");
+      const q = new URLSearchParams({
+        desde: fechaDesde.trim(),
+        hasta: fechaHasta.trim(),
+        _t: String(Date.now()),
+      });
+      const res = await fetch(`/api/cajero/arqueo-vendedores?${q}`, { cache: "no-store" });
+      const data = (await res.json()) as {
+        error?: string;
+        sucursalNombre?: string;
+        filas?: ArqueoFila[];
+      };
+      if (!res.ok) {
+        setDocPrintErr(data.error ?? "No se pudo cargar el resumen para imprimir.");
         return;
       }
-      const teardown = () => {
-        try {
-          URL.revokeObjectURL(objectUrl);
-        } catch {
-          /* ignore */
-        }
-        try {
-          w.close();
-        } catch {
-          /* ignore */
-        }
-      };
-      w.addEventListener("afterprint", () => globalThis.setTimeout(teardown, 200), { once: true });
-      const doPrint = () => {
-        try {
-          w.focus();
-          w.print();
-        } catch {
-          setDocPrintErr("No se pudo abrir el cuadro de impresión.");
-          teardown();
-        }
-      };
-      if (w.document.readyState === "complete") {
-        globalThis.setTimeout(doPrint, 120);
-      } else {
-        w.addEventListener("load", () => globalThis.setTimeout(doPrint, 120), { once: true });
-      }
+      const filasPrint = Array.isArray(data.filas) ? data.filas : [];
+      const fechaImp = new Date().toLocaleString("es-BO", formatoMostrarFechaHoraBo);
+      const origin = globalThis.window?.location?.origin ?? "";
+      const html = buildReporteArqueoResumenHtml({
+        origin,
+        sucursalNombre: data.sucursalNombre?.trim() ?? sucursalNombre,
+        periodoLabel: labelPeriodoSalidas(fechaDesde, fechaHasta),
+        filas: filasPrint,
+        totales: totalesDesdeFilas(filasPrint),
+        fechaImpresion: fechaImp,
+      });
+      const r = openReporteArqueoResumenPrint(html);
+      if (!r.ok) setDocPrintErr(r.message);
     } catch {
       setDocPrintErr("No se pudo generar el resumen para imprimir.");
     } finally {
       setPrintingResumen(false);
     }
-  }, [filas, totales, sucursalNombre, fechaDesde, fechaHasta]);
+  }, [sucursalNombre, fechaDesde, fechaHasta]);
+
+  const imprimirSalidasHtml = useCallback(
+    (
+      payload: {
+        sucursalNombre: string;
+        fechaDesde: string;
+        fechaHasta: string;
+        lineas: SalidasApiLinea[];
+        totales: { totalBs: number; totalUsd: number };
+        vendedorLinea?: string;
+      }
+    ) => {
+      const origin = globalThis.window?.location?.origin ?? "";
+      const html = buildReporteSalidasDiariasHtml({
+        origin,
+        sucursalNombre: payload.sucursalNombre,
+        periodoLabel: labelPeriodoSalidas(payload.fechaDesde, payload.fechaHasta),
+        vendedorLinea: payload.vendedorLinea,
+        lineas: mapLineasPrint(payload.lineas),
+        totales: payload.totales,
+        fechaImpresion: new Date().toLocaleString("es-BO", formatoMostrarFechaHoraBo),
+      });
+      const r = openReporteSalidasDiariasPrint(html);
+      if (!r.ok) setDocPrintErr(r.message);
+    },
+    []
+  );
+
+  const imprimirSalidasGeneral = useCallback(async () => {
+    if (typeof document === "undefined") return;
+    setDocPrintErr(null);
+    setPrintingSalidasGeneral(true);
+    try {
+      const q = new URLSearchParams({
+        desde: fechaDesde.trim(),
+        hasta: fechaHasta.trim(),
+        _t: String(Date.now()),
+      });
+      const res = await fetch(`/api/cajero/arqueo-vendedores/salidas-sucursal?${q}`, { cache: "no-store" });
+      const data = (await res.json()) as {
+        error?: string;
+        sucursalNombre?: string;
+        fechaDesde?: string;
+        fechaHasta?: string;
+        lineas?: SalidasApiLinea[];
+        totales?: { totalBs: number; totalUsd: number };
+      };
+      if (!res.ok) {
+        setDocPrintErr(data.error ?? "No se pudo generar el reporte de salidas.");
+        return;
+      }
+      imprimirSalidasHtml({
+        sucursalNombre: data.sucursalNombre?.trim() ?? sucursalNombre,
+        fechaDesde: data.fechaDesde ?? fechaDesde,
+        fechaHasta: data.fechaHasta ?? fechaHasta,
+        lineas: Array.isArray(data.lineas) ? data.lineas : [],
+        totales: data.totales ?? { totalBs: 0, totalUsd: 0 },
+      });
+    } catch {
+      setDocPrintErr("Error de red al generar el reporte de salidas.");
+    } finally {
+      setPrintingSalidasGeneral(false);
+    }
+  }, [fechaDesde, fechaHasta, imprimirSalidasHtml, sucursalNombre]);
 
   const imprimirSalidasDiarias = useCallback(
     async (usuarioId: number, nombreVendedor: string) => {
@@ -292,6 +241,7 @@ export function ArqueoVendedoresPanel({
           usuarioId: String(usuarioId),
           desde: fechaDesde.trim(),
           hasta: fechaHasta.trim(),
+          _t: String(Date.now()),
         });
         const res = await fetch(`/api/cajero/arqueo-vendedores/salidas-documento?${q}`, { cache: "no-store" });
         const data = (await res.json()) as {
@@ -300,164 +250,30 @@ export function ArqueoVendedoresPanel({
           vendedor?: { nombreCompleto: string; username: string };
           fechaDesde?: string;
           fechaHasta?: string;
-          lineas?: SalidasDocLinea[];
-          totales?: { totalBs: number };
+          lineas?: SalidasApiLinea[];
+          totales?: { totalBs: number; totalUsd: number };
         };
         if (!res.ok) {
           setDocPrintErr(data.error ?? "No se pudo generar el documento.");
           return;
         }
-        const sucNom = data.sucursalNombre?.trim() ?? "";
         const vend = data.vendedor ?? { nombreCompleto: nombreVendedor, username: "" };
-        const d1 = data.fechaDesde ?? "";
-        const d2 = data.fechaHasta ?? "";
-        const lineas = Array.isArray(data.lineas) ? data.lineas : [];
-        const tot = data.totales ?? { totalBs: 0 };
-        const periodoLabel = labelPeriodoRango(d1, d2);
-        const fechaImp = new Date().toLocaleString("es-BO", formatoMostrarFechaHoraBo);
-        const origin = globalThis.window?.location?.origin ?? "";
-        const logoSrc = escHtml(`${origin}/img/logo.png`);
-
-        const bodyRows =
-          lineas.length === 0
-            ? `<tr><td colspan="7" style="padding:14px;border:1px solid #ccc;text-align:center;color:#666">Sin líneas de venta en el período seleccionado.</td></tr>`
-            : lineas
-                .map((ln) => {
-                  const fp = escHtml(formatFechaCelda(ln.fecha));
-                  const cod = escHtml(ln.codigo);
-                  const cp = escHtml(ln.codigoPieza);
-                  const me = escHtml(ln.medida);
-                  const de = escHtml(ln.descripcion);
-                  const cant = Math.trunc(Number(ln.cantidad)) || 0;
-                  const bs = round2(ln.totalLineaBs).toFixed(2);
-                  return `<tr>
-            <td style="padding:6px 8px;border:1px solid #ccc;white-space:nowrap">${fp}</td>
-            <td style="padding:6px 8px;border:1px solid #ccc;font-family:ui-monospace,monospace;font-size:10px">${cod}</td>
-            <td style="padding:6px 8px;border:1px solid #ccc;font-family:ui-monospace,monospace;font-size:10px">${cp}</td>
-            <td style="padding:6px 8px;border:1px solid #ccc;font-size:10px">${me}</td>
-            <td style="padding:6px 8px;border:1px solid #ccc;font-size:10px">${de}</td>
-            <td style="padding:6px 8px;border:1px solid #ccc;text-align:right;font-variant-numeric:tabular-nums">${cant}</td>
-            <td style="padding:6px 8px;border:1px solid #ccc;text-align:right;font-variant-numeric:tabular-nums">${bs}</td>
-          </tr>`;
-                })
-                .join("");
-
-        const titulo = escHtml("REPORTE DE SALIDAS DIARIAS");
-        const tienda = escHtml(sucNom ? `Caja · ${sucNom}` : "Caja");
-        const vendLine = escHtml(`Vendedor: ${vend.nombreCompleto}${vend.username ? ` (${vend.username})` : ""}`);
-        const per = escHtml(`Período: ${periodoLabel}`);
-        const totBs = round2(tot.totalBs).toFixed(2);
-        const fi = escHtml(fechaImp);
-
-        const docHtml = `<!DOCTYPE html>
-<html lang="es">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>${titulo}</title>
-  <style>
-    * { box-sizing: border-box; }
-    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 0; padding: 16px 18px; color: #111; font-size: 11px; line-height: 1.35; }
-    .head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 12px; border-bottom: 2px solid #111; padding-bottom: 10px; }
-    .head-mid { flex: 1; text-align: center; }
-    .marca { font-size: 13px; font-weight: 700; letter-spacing: 0.02em; margin-bottom: 4px; }
-    .titulo { font-size: 15px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em; }
-    .sub { margin-top: 6px; font-size: 11px; }
-    .logo { width: 72px; height: 52px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; border: 1px solid #ccc; background: #fafafa; }
-    .logo img { max-width: 100%; max-height: 100%; object-fit: contain; }
-    table.items { width: 100%; border-collapse: collapse; margin-top: 8px; }
-    table.items th { background: #e5e7eb; font-weight: 700; text-align: left; padding: 7px 8px; border: 1px solid #999; font-size: 10px; text-transform: uppercase; letter-spacing: 0.03em; }
-    table.items th.num { text-align: right; }
-    table.items td { vertical-align: top; }
-    .foot { display: flex; justify-content: space-between; align-items: flex-end; margin-top: 14px; font-size: 10px; color: #333; }
-    .tot { text-align: right; font-size: 12px; font-weight: 700; margin-top: 8px; }
-    @media print {
-      @page { size: A4 landscape; margin: 10mm; }
-      body { padding: 0; font-size: 10px; }
-      table.items th, table.items td { padding: 5px 6px; font-size: 9px; }
-    }
-  </style>
-</head>
-<body>
-  <header class="head">
-    <div class="logo"><img src="${logoSrc}" alt="" /></div>
-    <div class="head-mid">
-      <div class="marca">Repuestos</div>
-      <div class="titulo">${titulo}</div>
-      <div class="sub">${tienda}</div>
-      <div class="sub">${vendLine}</div>
-      <div class="sub">${per}</div>
-    </div>
-    <div style="width:72px"></div>
-  </header>
-  <table class="items">
-    <thead>
-      <tr>
-        <th>Fecha</th>
-        <th>Código</th>
-        <th>C_PIEZA</th>
-        <th>Medida</th>
-        <th>Descripción</th>
-        <th class="num">Cant.</th>
-        <th class="num">S_Bs.</th>
-      </tr>
-    </thead>
-    <tbody>${bodyRows}</tbody>
-  </table>
-  <div class="tot">TOTAL: ${escHtml(totBs)} Bs.</div>
-  <footer class="foot">
-    <span>${fi}</span>
-    <span>Página 1 de 1</span>
-  </footer>
-</body>
-</html>`;
-
-        const blob = new Blob([docHtml], { type: "text/html;charset=utf-8" });
-        const objectUrl = URL.createObjectURL(blob);
-        const w = globalThis.window?.open(objectUrl, "_blank");
-        if (!w) {
-          URL.revokeObjectURL(objectUrl);
-          setDocPrintErr("No se pudo abrir la ventana de impresión (¿bloqueador de ventanas?).");
-          return;
-        }
-
-        const teardown = () => {
-          try {
-            URL.revokeObjectURL(objectUrl);
-          } catch {
-            /* ignore */
-          }
-          try {
-            w.close();
-          } catch {
-            /* ignore */
-          }
-        };
-
-        w.addEventListener("afterprint", () => globalThis.setTimeout(teardown, 200), { once: true });
-
-        const doPrint = () => {
-          try {
-            w.focus();
-            w.print();
-          } catch {
-            setDocPrintErr("No se pudo abrir el cuadro de impresión.");
-            teardown();
-          }
-        };
-
-        if (w.document.readyState === "complete") {
-          globalThis.setTimeout(doPrint, 120);
-        } else {
-          w.addEventListener("load", () => globalThis.setTimeout(doPrint, 120), { once: true });
-        }
+        const vendLine = `Vendedor: ${vend.nombreCompleto}${vend.username ? ` (${vend.username})` : ""}`;
+        imprimirSalidasHtml({
+          sucursalNombre: data.sucursalNombre?.trim() ?? sucursalNombre,
+          fechaDesde: data.fechaDesde ?? fechaDesde,
+          fechaHasta: data.fechaHasta ?? fechaHasta,
+          lineas: Array.isArray(data.lineas) ? data.lineas : [],
+          totales: data.totales ?? { totalBs: 0, totalUsd: 0 },
+          vendedorLinea: vendLine,
+        });
       } catch {
         setDocPrintErr("Error de red al generar el documento.");
       } finally {
         setPrintingUsuarioId(null);
       }
     },
-    [fechaDesde, fechaHasta]
+    [fechaDesde, fechaHasta, imprimirSalidasHtml, sucursalNombre]
   );
 
   return (
@@ -485,13 +301,27 @@ export function ArqueoVendedoresPanel({
         </button>
         <button
           type="button"
-          onClick={imprimirResumenGeneralCaja}
+          onClick={() => void imprimirSalidasGeneral()}
+          disabled={loading || printingSalidasGeneral}
+          className="inline-flex items-center justify-center gap-2 rounded-xl border border-sky-500/40 bg-sky-950/50 px-4 py-2.5 text-sm font-semibold text-sky-100 shadow hover:bg-sky-900/60 disabled:cursor-not-allowed disabled:opacity-50"
+          title="Reporte de salidas diarias de toda la sucursal (detalle de ítems, como cierre de caja)"
+        >
+          {printingSalidasGeneral ? (
+            <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+          ) : (
+            <Printer className="h-4 w-4" aria-hidden />
+          )}
+          Imprimir salidas general
+        </button>
+        <button
+          type="button"
+          onClick={() => void imprimirResumenGeneralCaja()}
           disabled={loading || printingResumen}
           className="inline-flex items-center justify-center gap-2 rounded-xl border border-emerald-500/40 bg-emerald-950/50 px-4 py-2.5 text-sm font-semibold text-emerald-100 shadow hover:bg-emerald-900/60 disabled:cursor-not-allowed disabled:opacity-50"
-          title="Imprimir un solo documento con todos los vendedores y el total general de la sucursal"
+          title="Resumen por vendedor: totales Bs, USD, efectivo, QR, tarjeta y crédito"
         >
           {printingResumen ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Printer className="h-4 w-4" aria-hidden />}
-          Imprimir resumen general
+          Imprimir resumen (dinero)
         </button>
         <p className="text-xs text-slate-500">
           Rango activo:{" "}
@@ -506,8 +336,9 @@ export function ArqueoVendedoresPanel({
         <p className="text-sm text-slate-400">
           Sucursal: <span className="font-medium text-slate-200">{sucursalNombre}</span>. Incluye todos los vendedores
           activos asignados a esta sucursal; las columnas de montos suman ventas <span className="text-slate-300">confirmadas</span> en
-          el rango. <span className="text-slate-300">Imprimir resumen general</span> genera un solo documento con todos los vendedores y el total
-          de la sucursal; <span className="text-slate-300">Salidas</span> imprime el detalle por vendedor (ítems) para el arqueo / cierre del día.
+          el rango. <span className="text-slate-300">Salidas general</span> imprime el detalle de ítems de toda la sucursal (formato reporte de salidas);
+          <span className="text-slate-300"> Resumen (dinero)</span> los totales por vendedor y forma de pago;{" "}
+          <span className="text-slate-300">Salidas</span> en cada fila, el mismo reporte solo de ese vendedor.
         </p>
       ) : null}
 

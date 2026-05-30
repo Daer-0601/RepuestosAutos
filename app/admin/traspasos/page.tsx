@@ -13,9 +13,7 @@ export default async function AdminTraspasosPage({
   searchParams: Promise<{ error?: string }>;
 }) {
   const sp = await searchParams;
-  const sucursales = (await listSucursales())
-    .filter((s) => s.estado === "activo")
-    .map((s) => ({ id: s.id, nombre: s.nombre }));
+  const sucursales = (await listSucursales()).filter((s) => s.estado === "activo");
 
   return (
     <AdminPageShell

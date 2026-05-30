@@ -21,10 +21,13 @@ export async function GET(request: Request) {
   }
 
   const filas = await arqueoVentasPorVendedoresSucursal(ctx.sucursalId, desde, hasta);
-  return NextResponse.json({
-    sucursalNombre: ctx.sucursalNombre,
-    fechaDesde: desde,
-    fechaHasta: hasta,
-    filas,
-  });
+  return NextResponse.json(
+    {
+      sucursalNombre: ctx.sucursalNombre,
+      fechaDesde: desde,
+      fechaHasta: hasta,
+      filas,
+    },
+    { headers: { "Cache-Control": "no-store, no-cache, must-revalidate", Pragma: "no-cache" } }
+  );
 }
