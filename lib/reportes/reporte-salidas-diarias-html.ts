@@ -16,6 +16,8 @@ export type SalidasDiariasPrintLinea = {
   cantidad: number;
   totalLineaBs: number;
   totalLineaUsd: number;
+  esCredito?: boolean;
+  formaPagoLabel?: string;
 };
 
 export type SalidasDiariasPrintInput = {
@@ -77,7 +79,7 @@ export function buildReporteSalidasDiariasHtml(input: SalidasDiariasPrintInput):
 
   const bodyRows =
     input.lineas.length === 0
-      ? `<tr><td colspan="9" class="empty">Sin líneas de venta en el período seleccionado.</td></tr>`
+      ? `<tr><td colspan="10" class="empty">Sin líneas de venta en el período seleccionado.</td></tr>`
       : input.lineas
           .map((ln) => {
             const fp = escHtml(formatFechaSalidasCelda(ln.fecha));
@@ -86,12 +88,15 @@ export function buildReporteSalidasDiariasHtml(input: SalidasDiariasPrintInput):
             const cp = escHtml(ln.codigoPieza?.trim() || "—");
             const me = escHtml(ln.medida?.trim() || "—");
             const de = escHtml(ln.descripcion?.trim() || "—");
+            const pago = escHtml(ln.formaPagoLabel?.trim() || "—");
+            const pagoCls = ln.esCredito ? "c-pago c-pago-cred" : "c-pago";
             const cant = String(Math.trunc(Number(ln.cantidad)) || 0);
             const bs = fmtMontoSalidas(ln.totalLineaBs);
             const us = fmtMontoSalidas(ln.totalLineaUsd, 2);
             return `<tr>
             <td class="c-fecha">${fp}</td>
             <td class="c-vend">${vend}</td>
+            <td class="${pagoCls}">${pago}</td>
             <td class="c-mono">${cod}</td>
             <td class="c-mono">${cp}</td>
             <td class="c-med">${me}</td>
@@ -109,11 +114,22 @@ export function buildReporteSalidasDiariasHtml(input: SalidasDiariasPrintInput):
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>${titulo}</title>
-  <style>${reporteHojaPrintCss("portrait")}
-    .c-fecha { white-space: nowrap; font-size: 9.5pt; }
-    .c-vend { font-size: 9.5pt; line-height: 1.25; }
-    .c-med { font-size: 9.5pt; }
-    .c-desc { font-size: 10pt; }
+  <style>${reporteHojaPrintCss("landscape")}
+    table.items td, table.items th { overflow: hidden; }
+    .c-fecha { white-space: nowrap; font-size: 9pt; }
+    .c-vend { font-size: 9pt; line-height: 1.2; word-wrap: break-word; }
+    .c-pago {
+      font-size: 8.5pt;
+      line-height: 1.2;
+      white-space: normal;
+      word-wrap: break-word;
+      overflow-wrap: break-word;
+      hyphens: auto;
+    }
+    .c-pago-cred { font-weight: 700; }
+    .c-mono { font-size: 9pt; white-space: nowrap; }
+    .c-med { font-size: 9pt; word-wrap: break-word; }
+    .c-desc { font-size: 9.5pt; word-wrap: break-word; }
   </style>
 </head>
 <body>
@@ -129,20 +145,22 @@ export function buildReporteSalidasDiariasHtml(input: SalidasDiariasPrintInput):
   </header>
   <table class="items">
     <colgroup>
-      <col style="width:9%" />
-      <col style="width:14%" />
       <col style="width:7%" />
-      <col style="width:12%" />
-      <col style="width:9%" />
-      <col style="width:26%" />
-      <col style="width:6%" />
-      <col style="width:9%" />
+      <col style="width:11%" />
       <col style="width:8%" />
+      <col style="width:6%" />
+      <col style="width:12%" />
+      <col style="width:8%" />
+      <col style="width:26%" />
+      <col style="width:5%" />
+      <col style="width:8%" />
+      <col style="width:9%" />
     </colgroup>
     <thead>
       <tr>
         <th>Fecha</th>
         <th>Vendedor</th>
+        <th>Pago</th>
         <th>Cód.</th>
         <th>C_REP</th>
         <th>Medida</th>
@@ -155,7 +173,7 @@ export function buildReporteSalidasDiariasHtml(input: SalidasDiariasPrintInput):
     <tbody>${bodyRows}</tbody>
     <tfoot>
       <tr>
-        <td colspan="6" class="lbl">TOTALES:</td>
+        <td colspan="7" class="lbl">TOTALES:</td>
         <td class="num"></td>
         <td class="num">${totBs} Bs.</td>
         <td class="num">${totUsd} Sus.</td>

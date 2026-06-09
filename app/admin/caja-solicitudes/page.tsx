@@ -1,5 +1,6 @@
 import { AdminPageShell } from "@/app/admin/_components/admin-page-shell";
 import { CajaSolicitudesAdminPanel } from "@/app/admin/caja-solicitudes/_components/caja-solicitudes-admin-panel";
+import { CajaSolicitudesNavTabs } from "@/app/admin/caja-solicitudes/_components/caja-solicitudes-nav-tabs";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
@@ -20,6 +21,7 @@ export default async function AdminCajaSolicitudesPage({
       backLabel="Inicio admin"
       error={sp.error}
     >
+      <CajaSolicitudesNavTabs />
       <CajaSolicitudesAdminPanel />
     </AdminPageShell>
   );

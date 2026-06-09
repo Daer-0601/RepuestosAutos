@@ -350,6 +350,17 @@ export function mergeStocksEnFilas(
   }));
 }
 
+/** Quita precio de compra antes de enviar el catálogo al cliente (p. ej. panel cajero). */
+export function stripPrecioCompraCatalogoRows(
+  rows: ProductoCatalogoRowConStock[]
+): ProductoCatalogoRowConStock[] {
+  return rows.map(({ precio_compra_unitario_bs, precio_compra_unitario_usd, ...rest }) => ({
+    ...rest,
+    precio_compra_unitario_bs: null,
+    precio_compra_unitario_usd: null,
+  }));
+}
+
 export function stringifyCatalogoFiltros(
   f: CatalogoFiltrosInput,
   overrides?: Partial<CatalogoFiltrosInput>

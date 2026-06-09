@@ -12,6 +12,10 @@ import {
   type ClienteCreditoSeleccionado,
 } from "@/app/vendedor/ventas/nueva/_components/cliente-credito-buscador";
 import { CATALOGO_FILAS_DEFAULT } from "@/lib/catalogo-productos-constants";
+import {
+  applyCatalogoTextFilterChange,
+  type CatalogoTextFilterName,
+} from "@/lib/catalogo-filtros-texto";
 import type { ModoCatalogoVenta, ProductoVentaCompletoRow, VentaCatalogoApiRow } from "@/lib/types/venta-vendedor-catalogo";
 import {
   carritoProductoSinMetadatos,
@@ -103,6 +107,25 @@ export function NuevaVentaForm() {
   const [catalogoExpandido, setCatalogoExpandido] = useState(false);
   const metadatosHidratadosRef = useRef(new Set<number>());
   const hidratandoMetadatosRef = useRef(false);
+
+  function onCatalogoTextFilterChange(name: CatalogoTextFilterName, value: string) {
+    const next = applyCatalogoTextFilterChange(name, value, {
+      q,
+      codigo,
+      codigo_pieza: codigoPieza,
+      especificacion,
+      medida,
+      descripcion,
+      repuesto,
+    });
+    setQ(next.q);
+    setCodigo(next.codigo);
+    setCodigoPieza(next.codigo_pieza);
+    setEspecificacion(next.especificacion);
+    setMedida(next.medida);
+    setDescripcion(next.descripcion);
+    setRepuesto(next.repuesto);
+  }
 
   const loadContext = useCallback(async () => {
     setLoadingCtx(true);
@@ -810,7 +833,7 @@ export function NuevaVentaForm() {
                   <input
                     name="q"
                     value={q}
-                    onChange={(e) => setQ(e.target.value)}
+                    onChange={(e) => onCatalogoTextFilterChange("q", e.target.value)}
                     placeholder="Palabras en código, nombre, descripción…"
                     className={`${inp} mt-1`}
                   />
@@ -821,7 +844,7 @@ export function NuevaVentaForm() {
                   </label>
                   <input
                     value={codigo}
-                    onChange={(e) => setCodigo(e.target.value)}
+                    onChange={(e) => onCatalogoTextFilterChange("codigo", e.target.value)}
                     placeholder="Ej. 1000"
                     className={`${inp} mt-1 font-mono`}
                   />
@@ -830,7 +853,7 @@ export function NuevaVentaForm() {
                   <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Cód. pieza</label>
                   <input
                     value={codigoPieza}
-                    onChange={(e) => setCodigoPieza(e.target.value)}
+                    onChange={(e) => onCatalogoTextFilterChange("codigo_pieza", e.target.value)}
                     placeholder="OEM / referencia"
                     className={`${inp} mt-1`}
                   />
@@ -839,19 +862,35 @@ export function NuevaVentaForm() {
                   <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
                     Especificación
                   </label>
-                  <input value={especificacion} onChange={(e) => setEspecificacion(e.target.value)} className={`${inp} mt-1`} />
+                  <input
+                    value={especificacion}
+                    onChange={(e) => onCatalogoTextFilterChange("especificacion", e.target.value)}
+                    className={`${inp} mt-1`}
+                  />
                 </div>
                 <div>
                   <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Medida</label>
-                  <input value={medida} onChange={(e) => setMedida(e.target.value)} className={`${inp} mt-1`} />
+                  <input
+                    value={medida}
+                    onChange={(e) => onCatalogoTextFilterChange("medida", e.target.value)}
+                    className={`${inp} mt-1`}
+                  />
                 </div>
                 <div>
                   <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Descripción</label>
-                  <input value={descripcion} onChange={(e) => setDescripcion(e.target.value)} className={`${inp} mt-1`} />
+                  <input
+                    value={descripcion}
+                    onChange={(e) => onCatalogoTextFilterChange("descripcion", e.target.value)}
+                    className={`${inp} mt-1`}
+                  />
                 </div>
                 <div>
                   <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Repuesto</label>
-                  <input value={repuesto} onChange={(e) => setRepuesto(e.target.value)} className={`${inp} mt-1`} />
+                  <input
+                    value={repuesto}
+                    onChange={(e) => onCatalogoTextFilterChange("repuesto", e.target.value)}
+                    className={`${inp} mt-1`}
+                  />
                 </div>
                 <div>
                   <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Qué stock ver</label>

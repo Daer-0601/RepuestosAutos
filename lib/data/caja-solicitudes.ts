@@ -6,6 +6,7 @@ import {
   registrarCambioCaja,
   registrarDevolucionCaja,
 } from "@/lib/data/caja-movimientos";
+import { getProductoVentaCompletoPorCodigo } from "@/lib/data/ventas-vendedor";
 import { pool } from "@/lib/db";
 import { formatDateTimeMysqlBolivia } from "@/lib/fecha-bolivia";
 import type { ResultSetHeader, RowDataPacket } from "mysql2";
@@ -220,6 +221,10 @@ export async function crearCajaSolicitud(
 
   const codDev = input.devuelto.codigo.trim().toUpperCase();
   if (!codDev) return { ok: false, message: "Indicá el producto devuelto." };
+  const prodDev = await getProductoVentaCompletoPorCodigo(input.sucursalId, codDev);
+  if (!prodDev) {
+    return { ok: false, message: "Producto devuelto no encontrado o inactivo." };
+  }
   const montoDev = round2(Number(input.devuelto.montoBs));
   if (!Number.isFinite(montoDev) || montoDev <= 0) {
     return { ok: false, message: "El monto devuelto debe ser mayor a 0." };
@@ -245,6 +250,16 @@ export async function crearCajaSolicitud(
     }
     cantEnt = Math.max(1, Math.trunc(Number(ent.cantidad)));
     nomEnt = ent.nombre?.trim() || null;
+    const prodEnt = await getProductoVentaCompletoPorCodigo(input.sucursalId, codEnt);
+    if (!prodEnt) {
+      return { ok: false, message: "Producto entregado no encontrado o inactivo." };
+    }
+    if (prodEnt.stockMiSucursal < cantEnt) {
+      return {
+        ok: false,
+        message: `Stock insuficiente para ${codEnt} (disponible: ${prodEnt.stockMiSucursal}).`,
+      };
+    }
   }
 
   const fecha = formatDateTimeMysqlBolivia(new Date());
@@ -260,7 +275,7 @@ export async function crearCajaSolicitud(
       input.cajeroUsuarioId,
       input.tipo,
       codDev,
-      input.devuelto.nombre?.trim() || null,
+      input.devuelto.nombre?.trim() || prodDev.nombre || null,
       cantDev,
       montoDev,
       codEnt,
@@ -316,6 +331,99 @@ export async function listCajaSolicitudesAdmin(opts?: {
   return (rows as RowDataPacket[]).map(mapSolicitudRow);
 }
 
+export type ListCajaSolicitudesHistorialOpts = {
+  fechaDesde: string;
+  fechaHasta: string;
+  sucursalId?: number | null;
+  estado?: CajaSolicitudEstado | "todas";
+  tipo?: CajaSolicitudTipo | "todos";
+  limit?: number;
+};
+
+export type CajaSolicitudesHistorialResumen = {
+  total: number;
+  pendientes: number;
+  aprobadas: number;
+  rechazadas: number;
+  registradas: number;
+  montoDevueltoRegistradasBs: number;
+};
+
+function buildHistorialWhere(opts: ListCajaSolicitudesHistorialOpts): {
+  clauses: string[];
+  params: (string | number)[];
+} {
+  const clauses: string[] = [
+    "s.fecha_solicitud >= ?",
+    "s.fecha_solicitud < DATE_ADD(?, INTERVAL 1 DAY)",
+  ];
+  const params: (string | number)[] = [
+    `${opts.fechaDesde.trim()} 00:00:00`,
+    `${opts.fechaHasta.trim()} 00:00:00`,
+  ];
+
+  if (opts.sucursalId != null && Number.isFinite(opts.sucursalId) && opts.sucursalId > 0) {
+    clauses.push("s.sucursal_id = ?");
+    params.push(opts.sucursalId);
+  }
+  if (opts.estado && opts.estado !== "todas") {
+    clauses.push("s.estado = ?");
+    params.push(opts.estado);
+  }
+  if (opts.tipo && opts.tipo !== "todos") {
+    clauses.push("s.tipo = ?");
+    params.push(opts.tipo);
+  }
+
+  return { clauses, params };
+}
+
+export async function listCajaSolicitudesHistorialAdmin(
+  opts: ListCajaSolicitudesHistorialOpts
+): Promise<CajaSolicitudRow[]> {
+  await ensureCajaSolicitudesTable();
+  const lim = Math.min(Math.max(1, Math.trunc(opts.limit ?? 500)), 1000);
+  const { clauses, params } = buildHistorialWhere(opts);
+
+  const [rows] = await pool.execute<RowDataPacket[]>(
+    `${SELECT_SOLICITUD}
+     WHERE ${clauses.join(" AND ")}
+     ORDER BY s.fecha_solicitud DESC, s.id DESC
+     LIMIT ${lim}`,
+    params
+  );
+  return (rows as RowDataPacket[]).map(mapSolicitudRow);
+}
+
+export async function resumenCajaSolicitudesHistorialAdmin(
+  opts: Omit<ListCajaSolicitudesHistorialOpts, "limit">
+): Promise<CajaSolicitudesHistorialResumen> {
+  await ensureCajaSolicitudesTable();
+  const { clauses, params } = buildHistorialWhere(opts);
+
+  const [rows] = await pool.execute<RowDataPacket[]>(
+    `SELECT
+       COUNT(*) AS total,
+       SUM(CASE WHEN s.estado = 'pendiente' THEN 1 ELSE 0 END) AS pendientes,
+       SUM(CASE WHEN s.estado = 'aprobada' THEN 1 ELSE 0 END) AS aprobadas,
+       SUM(CASE WHEN s.estado = 'rechazada' THEN 1 ELSE 0 END) AS rechazadas,
+       SUM(CASE WHEN s.estado = 'registrada' THEN 1 ELSE 0 END) AS registradas,
+       SUM(CASE WHEN s.estado = 'registrada' THEN s.monto_devuelto_bs ELSE 0 END) AS monto_devuelto_registradas
+     FROM caja_solicitudes s
+     WHERE ${clauses.join(" AND ")}`,
+    params
+  );
+  const r = rows[0] as RowDataPacket | undefined;
+  return {
+    total: Number(r?.total ?? 0),
+    pendientes: Number(r?.pendientes ?? 0),
+    aprobadas: Number(r?.aprobadas ?? 0),
+    rechazadas: Number(r?.rechazadas ?? 0),
+    registradas: Number(r?.registradas ?? 0),
+    montoDevueltoRegistradasBs: round2(Number(r?.monto_devuelto_registradas ?? 0)),
+  };
+}
+
 export async function countCajaSolicitudesPendientes(): Promise<number> {
   await ensureCajaSolicitudesTable();
   const [rows] = await pool.execute<RowDataPacket[]>(
@@ -359,6 +467,20 @@ export async function resolverCajaSolicitud(
     return { ok: false, message: "Esta solicitud ya fue resuelta." };
   }
 
+  if (aprobar && sol.tipo === "cambio" && sol.codigoEntregado) {
+    const prodEnt = await getProductoVentaCompletoPorCodigo(sol.sucursalId, sol.codigoEntregado);
+    const cantEnt = sol.cantidadEntregada ?? 1;
+    if (!prodEnt) {
+      return { ok: false, message: "Producto entregado no encontrado o inactivo." };
+    }
+    if (prodEnt.stockMiSucursal < cantEnt) {
+      return {
+        ok: false,
+        message: `Sin stock suficiente para aprobar (${sol.codigoEntregado}: ${prodEnt.stockMiSucursal} disponible).`,
+      };
+    }
+  }
+
   const estado: CajaSolicitudEstado = aprobar ? "aprobada" : "rechazada";
   const fecha = formatDateTimeMysqlBolivia(new Date());
 
@@ -400,59 +522,113 @@ export async function registrarCajaSolicitudEnCaja(
     return { ok: false, message: "Estado de solicitud no válido para registrar." };
   }
 
-  if (sol.tipo === "devolucion") {
-    const r = await registrarDevolucionCaja({
-      sucursalId,
-      usuarioId: cajeroUsuarioId,
-      codigo: sol.codigoDevuelto,
-      cantidad: sol.cantidadDevuelta,
-      montoBs: sol.montoDevueltoBs,
-      nombre: sol.nombreDevuelto,
-      nota: sol.notaCajero,
-    });
-    if (!r.ok) return r;
-    const fecha = formatDateTimeMysqlBolivia(new Date());
-    await pool.execute(
-      `UPDATE caja_solicitudes
-       SET estado = 'registrada', movimiento_egreso_id = ?, fecha_registro = ?
-       WHERE id = ? AND estado = 'aprobada'`,
-      [r.id, fecha, id]
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+
+    const [lockRows] = await conn.execute<RowDataPacket[]>(
+      `SELECT id, tipo, estado, codigo_devuelto, nombre_devuelto, cantidad_devuelta, monto_devuelto_bs,
+              codigo_entregado, nombre_entregado, cantidad_entregada, monto_entregado_bs, nota_cajero
+       FROM caja_solicitudes
+       WHERE id = ? AND sucursal_id = ? AND cajero_usuario_id = ?
+       FOR UPDATE`,
+      [id, sucursalId, cajeroUsuarioId]
     );
-    return { ok: true, movimientoEgresoId: r.id, movimientoIngresoId: null };
+    const locked = lockRows[0] as RowDataPacket | undefined;
+    if (!locked || String(locked.estado) !== "aprobada") {
+      await conn.rollback();
+      return { ok: false, message: "Esta solicitud ya fue registrada o no está aprobada." };
+    }
+
+    const fecha = formatDateTimeMysqlBolivia(new Date());
+
+    if (String(locked.tipo) === "devolucion") {
+      const r = await registrarDevolucionCaja(
+        {
+          sucursalId,
+          usuarioId: cajeroUsuarioId,
+          codigo: String(locked.codigo_devuelto ?? ""),
+          cantidad: Number(locked.cantidad_devuelta ?? 1),
+          montoBs: Number(locked.monto_devuelto_bs ?? 0),
+          nombre:
+            locked.nombre_devuelto != null ? String(locked.nombre_devuelto) : null,
+          nota: locked.nota_cajero != null ? String(locked.nota_cajero) : null,
+          solicitudId: id,
+        },
+        conn
+      );
+      if (!r.ok) {
+        await conn.rollback();
+        return r;
+      }
+
+      const [res] = await conn.execute<ResultSetHeader>(
+        `UPDATE caja_solicitudes
+         SET estado = 'registrada', movimiento_egreso_id = ?, fecha_registro = ?
+         WHERE id = ? AND estado = 'aprobada'`,
+        [r.id, fecha, id]
+      );
+      if (res.affectedRows < 1) {
+        await conn.rollback();
+        return { ok: false, message: "Esta solicitud ya fue registrada en caja." };
+      }
+
+      await conn.commit();
+      return { ok: true, movimientoEgresoId: r.id, movimientoIngresoId: null };
+    }
+
+    if (!locked.codigo_entregado || locked.monto_entregado_bs == null) {
+      await conn.rollback();
+      return { ok: false, message: "Datos incompletos para el cambio." };
+    }
+
+    const r = await registrarCambioCaja(
+      {
+        sucursalId,
+        usuarioId: cajeroUsuarioId,
+        devuelto: {
+          codigo: String(locked.codigo_devuelto ?? ""),
+          cantidad: Number(locked.cantidad_devuelta ?? 1),
+          montoBs: Number(locked.monto_devuelto_bs ?? 0),
+          nombre:
+            locked.nombre_devuelto != null ? String(locked.nombre_devuelto) : null,
+        },
+        entregado: {
+          codigo: String(locked.codigo_entregado ?? ""),
+          cantidad: Number(locked.cantidad_entregada ?? 1),
+          montoBs: Number(locked.monto_entregado_bs ?? 0),
+          nombre:
+            locked.nombre_entregado != null ? String(locked.nombre_entregado) : null,
+        },
+        nota: locked.nota_cajero != null ? String(locked.nota_cajero) : null,
+        solicitudId: id,
+      },
+      conn
+    );
+    if (!r.ok) {
+      await conn.rollback();
+      return r;
+    }
+
+    const [res] = await conn.execute<ResultSetHeader>(
+      `UPDATE caja_solicitudes
+       SET estado = 'registrada', movimiento_egreso_id = ?, movimiento_ingreso_id = ?, fecha_registro = ?
+       WHERE id = ? AND estado = 'aprobada'`,
+      [r.ids[0], r.ids[1], fecha, id]
+    );
+    if (res.affectedRows < 1) {
+      await conn.rollback();
+      return { ok: false, message: "Esta solicitud ya fue registrada en caja." };
+    }
+
+    await conn.commit();
+    return { ok: true, movimientoEgresoId: r.ids[0], movimientoIngresoId: r.ids[1] };
+  } catch {
+    await conn.rollback();
+    return { ok: false, message: "No se pudo registrar en caja. Intentá de nuevo." };
+  } finally {
+    conn.release();
   }
-
-  if (!sol.codigoEntregado || sol.montoEntregadoBs == null) {
-    return { ok: false, message: "Datos incompletos para el cambio." };
-  }
-
-  const r = await registrarCambioCaja({
-    sucursalId,
-    usuarioId: cajeroUsuarioId,
-    devuelto: {
-      codigo: sol.codigoDevuelto,
-      cantidad: sol.cantidadDevuelta,
-      montoBs: sol.montoDevueltoBs,
-      nombre: sol.nombreDevuelto,
-    },
-    entregado: {
-      codigo: sol.codigoEntregado,
-      cantidad: sol.cantidadEntregada ?? 1,
-      montoBs: sol.montoEntregadoBs,
-      nombre: sol.nombreEntregado,
-    },
-    nota: sol.notaCajero,
-  });
-  if (!r.ok) return r;
-
-  const fecha = formatDateTimeMysqlBolivia(new Date());
-  await pool.execute(
-    `UPDATE caja_solicitudes
-     SET estado = 'registrada', movimiento_egreso_id = ?, movimiento_ingreso_id = ?, fecha_registro = ?
-     WHERE id = ? AND estado = 'aprobada'`,
-    [r.ids[0], r.ids[1], fecha, id]
-  );
-
-  return { ok: true, movimientoEgresoId: r.ids[0], movimientoIngresoId: r.ids[1] };
 }
 
 /** Vista previa del detalle (sin guardar movimiento). */

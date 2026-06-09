@@ -51,6 +51,11 @@ export default async function AdminCompraDetallePage({
   if (sp.sucursal?.trim()) queryExtra.set("sucursal", sp.sucursal.trim());
   const volverHref = queryExtra.toString() ? `/admin/compras?${queryExtra.toString()}` : "/admin/compras";
 
+  const fleteUsd =
+    header.tipoCambioSnapshot > 0
+      ? header.precioFleteTotalBs / header.tipoCambioSnapshot
+      : 0;
+
   return (
     <AdminPageShell
       backHref={volverHref}
@@ -97,9 +102,9 @@ export default async function AdminCompraDetallePage({
             <p className="font-mono text-2xl font-semibold tabular-nums text-rose-100">
               {header.totalBs.toFixed(2)} <span className="text-sm font-normal text-slate-400">Bs</span>
             </p>
-            {header.totalUsd > 0 ? (
-              <p className="font-mono text-sm text-slate-400">≈ {header.totalUsd.toFixed(4)} USD</p>
-            ) : null}
+            <p className="font-mono text-lg font-semibold tabular-nums text-sky-200/90">
+              {header.totalUsd.toFixed(4)} <span className="text-sm font-normal text-slate-400">USD</span>
+            </p>
           </div>
         </div>
 
@@ -111,11 +116,22 @@ export default async function AdminCompraDetallePage({
         </div>
 
         <div className="border-t border-white/10 bg-black/15 px-4 py-3 text-xs text-slate-500 sm:px-5">
-          Subtotal: <span className="font-mono text-slate-300">{header.subtotalBs.toFixed(2)} Bs</span>
+          Subtotal:{" "}
+          <span className="font-mono text-slate-300">{header.subtotalBs.toFixed(2)} Bs</span>
+          {" · "}
+          <span className="font-mono text-sky-200/80">{header.subtotalUsd.toFixed(4)} USD</span>
           {" · "}
           Flete: <span className="font-mono text-slate-300">{header.precioFleteTotalBs.toFixed(2)} Bs</span>
+          {fleteUsd > 0 ? (
+            <>
+              {" · "}
+              <span className="font-mono text-sky-200/80">{fleteUsd.toFixed(4)} USD</span>
+            </>
+          ) : null}
           {" · "}
           Total: <span className="font-mono text-slate-200">{header.totalBs.toFixed(2)} Bs</span>
+          {" · "}
+          <span className="font-mono text-sky-100">{header.totalUsd.toFixed(4)} USD</span>
         </div>
       </article>
 

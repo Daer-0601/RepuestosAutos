@@ -3,6 +3,7 @@
 import { logout } from "@/lib/auth/logout";
 import {
   ArrowLeftRight,
+  ArrowDownUp,
   BarChart3,
   Building2,
   ClipboardCheck,
@@ -29,6 +30,7 @@ const nav = [
   { href: "/admin/bajas-inventario", label: "Baja inventario", icon: PackageMinus },
   { href: "/admin/caja-solicitudes", label: "Solicitudes caja", icon: ClipboardCheck },
   { href: "/admin/reportes", label: "Reportes", icon: BarChart3 },
+  { href: "/admin/reportes/ingresos-egresos", label: "Ingresos / egresos", icon: ArrowDownUp },
   { href: "/admin/usuarios", label: "Usuarios", icon: Users },
   { href: "/admin/productos", label: "Productos", icon: Package },
   { href: "/admin/pedidos", label: "Pedidos (Excel)", icon: FileSpreadsheet },
@@ -120,7 +122,7 @@ export function AdminSidebar({ username }: { username: string }) {
               href={item.href}
               label={item.label}
               Icon={item.icon}
-              exact={"exact" in item ? item.exact : false}
+              exact={"exact" in item ? item.exact : item.href === "/admin/reportes"}
               onNavigate={() => setOpen(false)}
             />
           ))}

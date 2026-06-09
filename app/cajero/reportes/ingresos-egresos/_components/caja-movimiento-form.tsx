@@ -491,7 +491,11 @@ export function CajaMovimientoForm({
         className="mt-4 inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
       >
         {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-        {modo === "cambio" ? "Registrar cambio" : modo === "devolucion" ? "Registrar devolución" : "Guardar movimiento"}
+        {modo === "cambio"
+          ? "Enviar solicitud de cambio"
+          : modo === "devolucion"
+            ? "Enviar solicitud de devolución"
+            : "Guardar movimiento"}
       </button>
     </form>
   );

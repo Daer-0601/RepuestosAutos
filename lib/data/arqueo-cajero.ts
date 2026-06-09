@@ -4,6 +4,27 @@ import { ventasRangoFechaSql } from "@/lib/fecha-bolivia";
 import { withBoliviaMysqlSession } from "@/lib/mysql-bolivia-session";
 import type { RowDataPacket } from "mysql2";
 
+/** Venta entregada o registrada a crédito (aunque después se cobre en caja). */
+const SQL_VENTA_ES_CREDITO = `(cr.id IS NOT NULL OR v.tipo_pago = 'credito')`;
+
+/** Cobro al contado (no venta a crédito). */
+const SQL_VENTA_COBRO_CONTADO = `(cr.id IS NULL AND v.tipo_pago <> 'credito')`;
+
+/** Crédito ya cobrado en caja (excluye pendientes y vencidos). */
+const SQL_VENTA_CREDITO_COBRADO = `(${SQL_VENTA_ES_CREDITO} AND v.estado_cobro = 'cobrado' AND (cr.estado = 'pagado' OR COALESCE(cr.saldo_pendiente_bs, 0) <= 0))`;
+
+/** Venta con dinero ya registrado en caja. */
+const SQL_VENTA_COBRADA = `(v.estado_cobro = 'cobrado')`;
+
+function sqlFiltroUsuarioIds(
+  usuarioIds: number[] | null | undefined,
+  columna: string
+): { clause: string; params: number[] } {
+  if (!usuarioIds?.length) return { clause: "", params: [] };
+  const ph = usuarioIds.map(() => "?").join(", ");
+  return { clause: `AND ${columna} IN (${ph})`, params: usuarioIds };
+}
+
 export type ArqueoVendedorRow = {
   usuarioId: number;
   nombreCompleto: string;
@@ -25,7 +46,8 @@ export type ArqueoVendedorRow = {
 export async function arqueoVentasPorVendedoresSucursal(
   sucursalId: number,
   fechaDesde: string,
-  fechaHasta: string
+  fechaHasta: string,
+  usuarioIds?: number[] | null
 ): Promise<ArqueoVendedorRow[]> {
   if (!Number.isFinite(sucursalId) || sucursalId < 1) return [];
   const d1 = fechaDesde.trim();
@@ -33,27 +55,30 @@ export async function arqueoVentasPorVendedoresSucursal(
   if (!d1 || !d2) return [];
 
   const rango = ventasRangoFechaSql(d1, d2);
+  const filtroV = sqlFiltroUsuarioIds(usuarioIds, "u.id");
   const [rows] = await withBoliviaMysqlSession((conn) =>
     conn.execute<RowDataPacket[]>(
       `SELECT u.id AS usuario_id,
             u.nombre_completo AS nombre_completo,
             u.username AS username,
-            COUNT(v.id) AS cantidad_ventas,
-            COALESCE(SUM(v.total_bs), 0) AS total_bs,
-            COALESCE(SUM(v.total_usd), 0) AS total_usd,
-            COALESCE(SUM(CASE WHEN v.estado_cobro = 'cobrado' AND v.tipo_pago = 'efectivo' THEN v.total_bs ELSE 0 END), 0) AS bs_efectivo,
-            COALESCE(SUM(CASE WHEN v.estado_cobro = 'cobrado' AND v.tipo_pago = 'qr' THEN v.total_bs ELSE 0 END), 0) AS bs_qr,
-            COALESCE(SUM(CASE WHEN v.estado_cobro = 'cobrado' AND v.tipo_pago = 'tarjeta' THEN v.total_bs ELSE 0 END), 0) AS bs_tarjeta,
-            COALESCE(SUM(CASE WHEN v.estado_cobro = 'cobrado' AND v.tipo_pago = 'credito' THEN v.total_bs ELSE 0 END), 0) AS bs_credito
+            COUNT(CASE WHEN ${SQL_VENTA_COBRADA} THEN v.id END) AS cantidad_ventas,
+            COALESCE(SUM(CASE WHEN ${SQL_VENTA_COBRADA} THEN v.total_bs ELSE 0 END), 0) AS total_bs,
+            COALESCE(SUM(CASE WHEN ${SQL_VENTA_COBRADA} THEN v.total_usd ELSE 0 END), 0) AS total_usd,
+            COALESCE(SUM(CASE WHEN ${SQL_VENTA_COBRO_CONTADO} AND v.estado_cobro = 'cobrado' AND v.tipo_pago = 'efectivo' THEN v.total_bs ELSE 0 END), 0) AS bs_efectivo,
+            COALESCE(SUM(CASE WHEN ${SQL_VENTA_COBRO_CONTADO} AND v.estado_cobro = 'cobrado' AND v.tipo_pago = 'qr' THEN v.total_bs ELSE 0 END), 0) AS bs_qr,
+            COALESCE(SUM(CASE WHEN ${SQL_VENTA_COBRO_CONTADO} AND v.estado_cobro = 'cobrado' AND v.tipo_pago = 'tarjeta' THEN v.total_bs ELSE 0 END), 0) AS bs_tarjeta,
+            COALESCE(SUM(CASE WHEN ${SQL_VENTA_CREDITO_COBRADO} THEN v.total_bs ELSE 0 END), 0) AS bs_credito
      FROM usuarios u
      LEFT JOIN ventas v ON v.usuario_id = u.id
        AND v.sucursal_id = ?
        AND v.estado = 'confirmada'
        ${rango.clause}
+     LEFT JOIN creditos cr ON cr.venta_id = v.id
      WHERE u.rol_id = 3 AND u.sucursal_id = ? AND u.activo = 1
+       ${filtroV.clause}
      GROUP BY u.id, u.nombre_completo, u.username
      ORDER BY u.nombre_completo ASC, u.username ASC`,
-      [sucursalId, ...rango.params, sucursalId]
+      [sucursalId, ...rango.params, sucursalId, ...filtroV.params]
     )
   );
 
@@ -86,7 +111,35 @@ export type SalidasDiariasArqueoLinea = {
   cantidad: number;
   totalLineaBs: number;
   totalLineaUsd: number;
+  /** Venta a crédito (entrega o tipo_pago crédito). */
+  esCredito: boolean;
+  /** Crédito ya saldado en caja. */
+  creditoCobrado: boolean;
+  /** Etiqueta para impresión: «Crédito», «Crédito · cobrado», etc. */
+  formaPagoLabel: string;
 };
+
+function esCreditoCobradoRow(r: RowDataPacket): boolean {
+  const creditoEstado = String(r.credito_estado ?? "").trim().toLowerCase();
+  return (
+    creditoEstado === "pagado" ||
+    String(r.estado_cobro ?? "").trim().toLowerCase() === "cobrado" ||
+    Number(r.saldo_pendiente_bs ?? 1) <= 0
+  );
+}
+
+function labelFormaPagoSalida(r: RowDataPacket): string {
+  const esCredito = Number(r.es_credito ?? 0) === 1;
+  if (!esCredito) {
+    const tp = String(r.tipo_pago ?? "").trim().toLowerCase();
+    if (tp === "efectivo") return "Efectivo";
+    if (tp === "qr") return "QR";
+    if (tp === "tarjeta") return "Tarjeta";
+    return "—";
+  }
+  const cobrado = esCreditoCobradoRow(r);
+  return cobrado ? "Créd. cobr." : "Créd. pend.";
+}
 
 function mapSalidasDiariasRow(r: RowDataPacket): SalidasDiariasArqueoLinea {
   const totalLineaBs = Number(r.total_linea_bs ?? 0);
@@ -113,6 +166,9 @@ function mapSalidasDiariasRow(r: RowDataPacket): SalidasDiariasArqueoLinea {
     cantidad: Number(r.cantidad ?? 0),
     totalLineaBs,
     totalLineaUsd,
+    esCredito: Number(r.es_credito ?? 0) === 1,
+    creditoCobrado: Number(r.es_credito ?? 0) !== 1 || esCreditoCobradoRow(r),
+    formaPagoLabel: labelFormaPagoSalida(r),
   };
 }
 
@@ -120,6 +176,11 @@ const SQL_SALIDAS_DIARIAS_SELECT = `SELECT v.fecha AS fecha,
             v.id AS venta_id,
             v.numero_documento AS numero_documento,
             v.tipo_cambio_snapshot AS tipo_cambio_snapshot,
+            v.tipo_pago AS tipo_pago,
+            v.estado_cobro AS estado_cobro,
+            CASE WHEN ${SQL_VENTA_ES_CREDITO} THEN 1 ELSE 0 END AS es_credito,
+            cr.estado AS credito_estado,
+            cr.saldo_pendiente_bs AS saldo_pendiente_bs,
             d.cantidad AS cantidad,
             d.total_linea_bs AS total_linea_bs,
             COALESCE(NULLIF(TRIM(u.nombre_completo), ''), NULLIF(TRIM(u.username), ''), '—') AS vendedor_nombre,
@@ -174,6 +235,7 @@ export async function listSalidasDiariasArqueoPorVendedor(
       `${SQL_SALIDAS_DIARIAS_SELECT}
      FROM venta_detalle d
      INNER JOIN ventas v ON v.id = d.venta_id
+     LEFT JOIN creditos cr ON cr.venta_id = v.id
      INNER JOIN usuarios u ON u.id = v.usuario_id
      INNER JOIN productos p ON p.id = d.producto_id
      WHERE v.sucursal_id = ?
@@ -196,7 +258,8 @@ export async function listSalidasDiariasArqueoSucursal(
   sucursalId: number,
   fechaDesde: string,
   fechaHasta: string,
-  limitRows = 12000
+  limitRows = 12000,
+  usuarioIds?: number[] | null
 ): Promise<SalidasDiariasArqueoLinea[]> {
   if (!Number.isFinite(sucursalId) || sucursalId < 1) return [];
   const d1 = fechaDesde.trim();
@@ -205,19 +268,22 @@ export async function listSalidasDiariasArqueoSucursal(
 
   const lim = Math.min(Math.max(1, Math.trunc(limitRows)), 12000);
   const rango = ventasRangoFechaSql(d1, d2);
+  const filtroV = sqlFiltroUsuarioIds(usuarioIds, "v.usuario_id");
   const [rows] = await withBoliviaMysqlSession((conn) =>
     conn.execute<RowDataPacket[]>(
       `${SQL_SALIDAS_DIARIAS_SELECT}
      FROM venta_detalle d
      INNER JOIN ventas v ON v.id = d.venta_id
+     LEFT JOIN creditos cr ON cr.venta_id = v.id
      INNER JOIN usuarios u ON u.id = v.usuario_id
      INNER JOIN productos p ON p.id = d.producto_id
      WHERE v.sucursal_id = ?
        AND v.estado = 'confirmada'
        ${rango.clause}
+       ${filtroV.clause}
      ORDER BY v.fecha ASC, v.id ASC, d.id ASC
      LIMIT ${lim}`,
-      [sucursalId, ...rango.params]
+      [sucursalId, ...rango.params, ...filtroV.params]
     )
   );
 
@@ -228,6 +294,7 @@ export function totalesSalidasDiarias(lineas: SalidasDiariasArqueoLinea[]): { to
   let totalBs = 0;
   let totalUsd = 0;
   for (const ln of lineas) {
+    if (ln.esCredito && !ln.creditoCobrado) continue;
     totalBs = Math.round((totalBs + ln.totalLineaBs) * 100) / 100;
     totalUsd = Math.round((totalUsd + ln.totalLineaUsd) * 1e4) / 1e4;
   }

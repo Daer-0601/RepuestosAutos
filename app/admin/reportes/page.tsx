@@ -1,4 +1,5 @@
 import { AdminPageShell } from "@/app/admin/_components/admin-page-shell";
+import { ReportesNavTabs } from "@/app/admin/reportes/_components/reportes-nav-tabs";
 import {
   cardexVentasProductoPorSucursalYPeriodo,
   comprasPorSucursalPorPeriodo,
@@ -112,6 +113,8 @@ export default async function AdminReportesPage({
         nombreSucursalActiva ? ` · sucursal: ${nombreSucursalActiva}` : " · todas las sucursales"
       }. Cardex: código + sucursal.`}
     >
+      <ReportesNavTabs />
+
       <div className="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-end sm:justify-between">
         <div className="flex flex-wrap gap-2">
           <span className="w-full text-xs font-medium uppercase tracking-wider text-slate-500 sm:w-auto sm:self-center">

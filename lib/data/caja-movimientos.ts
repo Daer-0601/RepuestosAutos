@@ -1,8 +1,18 @@
 import "server-only";
 
 import { labelDetalleProductoCodigoNombre } from "@/lib/caja/detalle-producto-label";
+import { codigoTienda } from "@/lib/caja/tienda-codigo";
 import { pool } from "@/lib/db";
-import { formatDateTimeMysqlBolivia, ventasRangoFechaSql } from "@/lib/fecha-bolivia";
+import {
+  consumirStockCaja,
+  ingresarStockCaja,
+  resolverProductoActivoPorCodigo,
+} from "@/lib/data/inventario-caja";
+import {
+  diaRangoDatetimeSql,
+  formatDateTimeMysqlBolivia,
+  ventasCobroRangoFechaSql,
+} from "@/lib/fecha-bolivia";
 import { withBoliviaMysqlSession } from "@/lib/mysql-bolivia-session";
 import type { ResultSetHeader, RowDataPacket } from "mysql2";
 import type { PoolConnection } from "mysql2/promise";
@@ -116,6 +126,8 @@ export type RegistrarDevolucionCajaInput = {
   montoBs: number;
   nombre?: string | null;
   nota?: string | null;
+  /** Referencia de solicitud aprobada (movimiento inventario). */
+  solicitudId?: number;
 };
 
 export type RegistrarCambioCajaInput = {
@@ -124,6 +136,7 @@ export type RegistrarCambioCajaInput = {
   devuelto: { codigo: string; cantidad: number; montoBs: number; nombre?: string | null };
   entregado: { codigo: string; cantidad: number; montoBs: number; nombre?: string | null };
   nota?: string | null;
+  solicitudId?: number;
 };
 
 /** Texto estándar para devolución / egreso en cambio (como planilla). */
@@ -255,7 +268,8 @@ export async function registrarCajaMovimiento(
 }
 
 export async function registrarDevolucionCaja(
-  input: RegistrarDevolucionCajaInput
+  input: RegistrarDevolucionCajaInput,
+  existingConn?: PoolConnection
 ): Promise<{ ok: true; id: number } | { ok: false; message: string }> {
   await ensureCajaMovimientosTable();
   const codigo = input.codigo.trim().toUpperCase();
@@ -269,18 +283,54 @@ export async function registrarDevolucionCaja(
   const nota = input.nota?.trim();
   if (nota) detalle = `${detalle} — ${nota}`.slice(0, 500);
 
-  const id = await insertCajaMovimientoRow(pool, {
-    sucursalId: input.sucursalId,
-    usuarioId: input.usuarioId,
-    tipo: "egreso",
-    detalle,
-    montoBs,
-  });
-  return { ok: true, id };
+  const conn = existingConn ?? (await pool.getConnection());
+  const ownConn = !existingConn;
+  try {
+    if (ownConn) await conn.beginTransaction();
+    const producto = await resolverProductoActivoPorCodigo(conn, codigo);
+    if (!producto) {
+      if (ownConn) await conn.rollback();
+      return { ok: false, message: "Producto devuelto no encontrado o inactivo." };
+    }
+
+    const fecha = formatDateTimeMysqlBolivia(new Date());
+    const id = await insertCajaMovimientoRow(conn, {
+      sucursalId: input.sucursalId,
+      usuarioId: input.usuarioId,
+      tipo: "egreso",
+      detalle,
+      montoBs,
+      fecha,
+    });
+
+    const inv = await ingresarStockCaja(conn, {
+      productoId: producto.id,
+      sucursalId: input.sucursalId,
+      cantidad,
+      referenciaTipo: "devolucion",
+      referenciaId: input.solicitudId ?? id,
+      usuarioId: input.usuarioId,
+      nota: `Devolución caja #${id}`,
+      fecha,
+    });
+    if (!inv.ok) {
+      if (ownConn) await conn.rollback();
+      return inv;
+    }
+
+    if (ownConn) await conn.commit();
+    return { ok: true, id };
+  } catch {
+    if (ownConn) await conn.rollback();
+    return { ok: false, message: "No se pudo registrar la devolución. Intentá de nuevo." };
+  } finally {
+    if (ownConn) conn.release();
+  }
 }
 
 export async function registrarCambioCaja(
-  input: RegistrarCambioCajaInput
+  input: RegistrarCambioCajaInput,
+  existingConn?: PoolConnection
 ): Promise<{ ok: true; ids: [number, number] } | { ok: false; message: string }> {
   await ensureCajaMovimientosTable();
   const codDev = input.devuelto.codigo.trim().toUpperCase();
@@ -315,10 +365,54 @@ export async function registrarCambioCaja(
     detalleIng = `${detalleIng} — ${nota}`.slice(0, 500);
   }
 
-  const conn = await pool.getConnection();
+  const conn = existingConn ?? (await pool.getConnection());
+  const ownConn = !existingConn;
   try {
-    await conn.beginTransaction();
+    if (ownConn) await conn.beginTransaction();
+    const prodDev = await resolverProductoActivoPorCodigo(conn, codDev);
+    if (!prodDev) {
+      if (ownConn) await conn.rollback();
+      return { ok: false, message: "Producto devuelto no encontrado o inactivo." };
+    }
+    const prodEnt = await resolverProductoActivoPorCodigo(conn, codEnt);
+    if (!prodEnt) {
+      if (ownConn) await conn.rollback();
+      return { ok: false, message: "Producto entregado no encontrado o inactivo." };
+    }
+
     const fecha = formatDateTimeMysqlBolivia(new Date());
+    const refId = input.solicitudId ?? 0;
+
+    const salida = await consumirStockCaja(conn, {
+      productoId: prodEnt.id,
+      sucursalId: input.sucursalId,
+      cantidad: cantEnt,
+      referenciaTipo: "cambio_entregado",
+      referenciaId: refId,
+      usuarioId: input.usuarioId,
+      nota: `Cambio entregado COD ${codEnt}`,
+      fecha,
+    });
+    if (!salida.ok) {
+      if (ownConn) await conn.rollback();
+      return salida;
+    }
+
+    const entrada = await ingresarStockCaja(conn, {
+      productoId: prodDev.id,
+      sucursalId: input.sucursalId,
+      cantidad: cantDev,
+      referenciaTipo: "cambio_devuelto",
+      referenciaId: refId,
+      usuarioId: input.usuarioId,
+      nota: `Cambio devuelto COD ${codDev}`,
+      fecha,
+    });
+    if (!entrada.ok) {
+      if (ownConn) await conn.rollback();
+      return entrada;
+    }
+
     const idEgr = await insertCajaMovimientoRow(conn, {
       sucursalId: input.sucursalId,
       usuarioId: input.usuarioId,
@@ -335,13 +429,13 @@ export async function registrarCambioCaja(
       montoBs: montoEnt,
       fecha,
     });
-    await conn.commit();
+    if (ownConn) await conn.commit();
     return { ok: true, ids: [idEgr, idIng] };
   } catch {
-    await conn.rollback();
+    if (ownConn) await conn.rollback();
     return { ok: false, message: "No se pudo registrar el cambio. Intentá de nuevo." };
   } finally {
-    conn.release();
+    if (ownConn) conn.release();
   }
 }
 
@@ -380,15 +474,18 @@ export async function listCajaMovimientosDia(
   const f = fecha.trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(f)) return [];
 
-  const [rows] = await pool.execute<RowDataPacket[]>(
-    `SELECT m.id, m.tipo, m.detalle, m.monto_bs, m.en_dolares, m.monto_usd, m.tipo_cambio_compra,
-            m.fecha, m.usuario_id, u.username, u.nombre_completo
-     FROM caja_movimientos m
-     INNER JOIN usuarios u ON u.id = m.usuario_id
-     WHERE m.sucursal_id = ?
-       AND DATE(m.fecha) = ?
-     ORDER BY m.fecha ASC, m.id ASC`,
-    [sucursalId, f]
+  const rango = diaRangoDatetimeSql(f, "m.fecha");
+  const [rows] = await withBoliviaMysqlSession((conn) =>
+    conn.execute<RowDataPacket[]>(
+      `SELECT m.id, m.tipo, m.detalle, m.monto_bs, m.en_dolares, m.monto_usd, m.tipo_cambio_compra,
+              m.fecha, m.usuario_id, u.username, u.nombre_completo
+       FROM caja_movimientos m
+       INNER JOIN usuarios u ON u.id = m.usuario_id
+       WHERE m.sucursal_id = ?
+         ${rango.clause}
+       ORDER BY m.fecha ASC, m.id ASC`,
+      [sucursalId, ...rango.params]
+    )
   );
 
   return (rows as RowDataPacket[]).map(mapMovimientoRow);
@@ -396,20 +493,42 @@ export async function listCajaMovimientosDia(
 
 export async function deleteCajaMovimiento(
   id: number,
-  sucursalId: number
+  sucursalId: number,
+  usuarioId: number
 ): Promise<{ ok: true } | { ok: false; message: string }> {
   await ensureCajaMovimientosTable();
   if (!Number.isFinite(id) || id < 1) return { ok: false, message: "Movimiento no válido." };
   if (!Number.isFinite(sucursalId) || sucursalId < 1) {
     return { ok: false, message: "Sucursal no válida." };
   }
+  if (!Number.isFinite(usuarioId) || usuarioId < 1) {
+    return { ok: false, message: "Usuario no válido." };
+  }
+
+  try {
+    const [linkRows] = await pool.execute<RowDataPacket[]>(
+      `SELECT id FROM caja_solicitudes
+       WHERE movimiento_egreso_id = ? OR movimiento_ingreso_id = ?
+       LIMIT 1`,
+      [id, id]
+    );
+    if ((linkRows as RowDataPacket[]).length > 0) {
+      return { ok: false, message: "No se puede borrar un movimiento vinculado a devolución o cambio." };
+    }
+  } catch (err: unknown) {
+    const e = err as { errno?: number };
+    if (e.errno !== 1146) throw err;
+  }
 
   const [res] = await pool.execute<ResultSetHeader>(
-    `DELETE FROM caja_movimientos WHERE id = ? AND sucursal_id = ?`,
-    [id, sucursalId]
+    `DELETE FROM caja_movimientos WHERE id = ? AND sucursal_id = ? AND usuario_id = ?`,
+    [id, sucursalId, usuarioId]
   );
   if (res.affectedRows < 1) {
-    return { ok: false, message: "No se encontró el movimiento en tu sucursal." };
+    return {
+      ok: false,
+      message: "No se encontró el movimiento o no tenés permiso para borrarlo.",
+    };
   }
   return { ok: true };
 }
@@ -434,7 +553,7 @@ export async function listVentasProductosDiaSucursal(
   if (!/^\d{4}-\d{2}-\d{2}$/.test(f)) return [];
 
   const lim = Math.min(Math.max(1, Math.trunc(limitRows)), 8000);
-  const rango = ventasRangoFechaSql(f, f);
+  const rango = ventasCobroRangoFechaSql(f, f);
   const [rows] = await withBoliviaMysqlSession((conn) =>
     conn.execute<RowDataPacket[]>(
       `SELECT p.id AS producto_id,
@@ -453,7 +572,6 @@ export async function listVentasProductosDiaSucursal(
      INNER JOIN productos p ON p.id = d.producto_id
      WHERE v.sucursal_id = ?
        AND v.estado = 'confirmada'
-       AND v.estado_cobro = 'cobrado'
        ${rango.clause}
      GROUP BY p.id, codigo, medida, nombre
      ORDER BY nombre ASC, codigo ASC, p.id ASC
@@ -481,14 +599,13 @@ export async function totalVentasConfirmadasDiaBs(
   const f = fecha.trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(f)) return 0;
 
-  const rango = ventasRangoFechaSql(f, f);
+  const rango = ventasCobroRangoFechaSql(f, f);
   const [rows] = await withBoliviaMysqlSession((conn) =>
     conn.execute<RowDataPacket[]>(
       `SELECT COALESCE(SUM(v.total_bs), 0) AS total_bs
      FROM ventas v
      WHERE v.sucursal_id = ?
        AND v.estado = 'confirmada'
-       AND v.estado_cobro = 'cobrado'
        ${rango.clause}`,
       [sucursalId, ...rango.params]
     )
@@ -505,7 +622,7 @@ export async function totalVentasDetalleCobradasDiaBs(
   const f = fecha.trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(f)) return 0;
 
-  const rango = ventasRangoFechaSql(f, f);
+  const rango = ventasCobroRangoFechaSql(f, f);
   const [rows] = await withBoliviaMysqlSession((conn) =>
     conn.execute<RowDataPacket[]>(
       `SELECT COALESCE(SUM(d.total_linea_bs), 0) AS total_bs
@@ -513,7 +630,6 @@ export async function totalVentasDetalleCobradasDiaBs(
      INNER JOIN ventas v ON v.id = d.venta_id
      WHERE v.sucursal_id = ?
        AND v.estado = 'confirmada'
-       AND v.estado_cobro = 'cobrado'
        ${rango.clause}`,
       [sucursalId, ...rango.params]
     )
@@ -530,14 +646,13 @@ export async function countVentasCobradasDiaSucursal(
   const f = fecha.trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(f)) return 0;
 
-  const rango = ventasRangoFechaSql(f, f);
+  const rango = ventasCobroRangoFechaSql(f, f);
   const [rows] = await withBoliviaMysqlSession((conn) =>
     conn.execute<RowDataPacket[]>(
       `SELECT COUNT(*) AS n
      FROM ventas v
      WHERE v.sucursal_id = ?
        AND v.estado = 'confirmada'
-       AND v.estado_cobro = 'cobrado'
        ${rango.clause}`,
       [sucursalId, ...rango.params]
     )
@@ -587,4 +702,32 @@ export async function numeroDocumentoIngresosEgresosDia(
 
   const n = Math.max(movMax, venMax);
   return n > 0 ? n : 1;
+}
+
+export type ReporteIngresosEgresosDia = {
+  fecha: string;
+  sucursalId: number;
+  sucursalNombre: string;
+  tiendaCodigo: string;
+  movimientos: CajaMovimientoRow[];
+};
+
+export async function getReporteIngresosEgresosDiaSucursal(
+  sucursalId: number,
+  fecha: string,
+  sucursalNombre: string
+): Promise<ReporteIngresosEgresosDia | null> {
+  if (!Number.isFinite(sucursalId) || sucursalId < 1) return null;
+  const f = fecha.trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(f)) return null;
+
+  const movimientos = await listCajaMovimientosDia(sucursalId, f);
+
+  return {
+    fecha: f,
+    sucursalId,
+    sucursalNombre,
+    tiendaCodigo: codigoTienda(sucursalId, sucursalNombre),
+    movimientos,
+  };
 }

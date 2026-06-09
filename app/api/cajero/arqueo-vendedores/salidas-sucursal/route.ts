@@ -1,4 +1,5 @@
 import { getCajeroStaffContextOrNull } from "@/lib/auth/staff-panel-context";
+import { parseVendedoresIdsQuery } from "@/lib/arqueo/vendedores-query";
 import { listSalidasDiariasArqueoSucursal, totalesSalidasDiarias } from "@/lib/data/arqueo-cajero";
 import { formatDateTimeMysqlBolivia, parseIsoDateOnly } from "@/lib/fecha-bolivia";
 import { NextResponse } from "next/server";
@@ -21,7 +22,9 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "La fecha desde no puede ser posterior a hasta." }, { status: 400 });
   }
 
-  const lineas = await listSalidasDiariasArqueoSucursal(ctx.sucursalId, desde, hasta);
+  const vendedoresIds = parseVendedoresIdsQuery(searchParams.get("vendedores"));
+
+  const lineas = await listSalidasDiariasArqueoSucursal(ctx.sucursalId, desde, hasta, 12000, vendedoresIds);
   const totales = totalesSalidasDiarias(lineas);
 
   return NextResponse.json(
@@ -29,6 +32,7 @@ export async function GET(request: Request) {
       sucursalNombre: ctx.sucursalNombre,
       fechaDesde: desde,
       fechaHasta: hasta,
+      vendedoresIds,
       lineas,
       totales,
     },

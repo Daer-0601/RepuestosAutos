@@ -6,6 +6,10 @@ import {
   type TraspasoLineaRow,
 } from "@/app/admin/traspasos/_components/traspaso-lineas-tabla";
 import { CATALOGO_FILAS_DEFAULT } from "@/lib/catalogo-productos-constants";
+import {
+  applyCatalogoTextFilterChange,
+  type CatalogoTextFilterName,
+} from "@/lib/catalogo-filtros-texto";
 import type { ProductoCatalogoRowConStock } from "@/lib/data/productos-catalogo";
 import type { SucursalRow } from "@/lib/data/sucursales";
 import { ChevronDown, ChevronUp, Loader2, Plus, ScanLine } from "lucide-react";
@@ -35,6 +39,7 @@ function metadatosLineaDesdeProducto(p: ProductoCatalogoRowConStock) {
     codigoPieza: p.codigo_pieza,
     medida: p.medida,
     nombre: p.nombre,
+    repuesto: p.repuesto,
     unidad: p.unidad,
     descripcion: p.descripcion,
     qrPayload: p.qr_payload?.trim() ? p.qr_payload.trim() : p.codigo,
@@ -99,6 +104,25 @@ export function TraspasoForm({ sucursales }: { sucursales: SucursalRow[] }) {
   const destinoNum = Number(sucursalDestinoId);
 
   const idsEnCarrito = useMemo(() => new Set(lineas.map((l) => l.productoId)), [lineas]);
+
+  function onCatalogoTextFilterChange(name: CatalogoTextFilterName, value: string) {
+    const next = applyCatalogoTextFilterChange(name, value, {
+      q,
+      codigo,
+      codigo_pieza: codigoPieza,
+      especificacion,
+      medida,
+      descripcion,
+      repuesto,
+    });
+    setQ(next.q);
+    setCodigo(next.codigo);
+    setCodigoPieza(next.codigo_pieza);
+    setEspecificacion(next.especificacion);
+    setMedida(next.medida);
+    setDescripcion(next.descripcion);
+    setRepuesto(next.repuesto);
+  }
 
   const puedeEnviar = useMemo(
     () =>
@@ -459,7 +483,7 @@ export function TraspasoForm({ sucursales }: { sucursales: SucursalRow[] }) {
                 </label>
                 <input
                   value={q}
-                  onChange={(e) => setQ(e.target.value)}
+                  onChange={(e) => onCatalogoTextFilterChange("q", e.target.value)}
                   placeholder="QR, código pieza, nombre…"
                   className={`${inpBuscarTodo} mt-1`}
                   autoComplete="off"
@@ -467,27 +491,57 @@ export function TraspasoForm({ sucursales }: { sucursales: SucursalRow[] }) {
               </div>
               <div>
                 <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Código</label>
-                <input value={codigo} onChange={(e) => setCodigo(e.target.value)} className={`${inp} mt-1 font-mono`} autoComplete="off" />
+                <input
+                  value={codigo}
+                  onChange={(e) => onCatalogoTextFilterChange("codigo", e.target.value)}
+                  className={`${inp} mt-1 font-mono`}
+                  autoComplete="off"
+                />
               </div>
               <div>
                 <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Cód. pieza</label>
-                <input value={codigoPieza} onChange={(e) => setCodigoPieza(e.target.value)} className={`${inp} mt-1`} autoComplete="off" />
+                <input
+                  value={codigoPieza}
+                  onChange={(e) => onCatalogoTextFilterChange("codigo_pieza", e.target.value)}
+                  className={`${inp} mt-1`}
+                  autoComplete="off"
+                />
               </div>
               <div>
                 <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Especificación</label>
-                <input value={especificacion} onChange={(e) => setEspecificacion(e.target.value)} className={`${inp} mt-1`} autoComplete="off" />
+                <input
+                  value={especificacion}
+                  onChange={(e) => onCatalogoTextFilterChange("especificacion", e.target.value)}
+                  className={`${inp} mt-1`}
+                  autoComplete="off"
+                />
               </div>
               <div>
                 <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Medida</label>
-                <input value={medida} onChange={(e) => setMedida(e.target.value)} className={`${inp} mt-1`} autoComplete="off" />
+                <input
+                  value={medida}
+                  onChange={(e) => onCatalogoTextFilterChange("medida", e.target.value)}
+                  className={`${inp} mt-1`}
+                  autoComplete="off"
+                />
               </div>
               <div>
                 <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Descripción</label>
-                <input value={descripcion} onChange={(e) => setDescripcion(e.target.value)} className={`${inp} mt-1`} autoComplete="off" />
+                <input
+                  value={descripcion}
+                  onChange={(e) => onCatalogoTextFilterChange("descripcion", e.target.value)}
+                  className={`${inp} mt-1`}
+                  autoComplete="off"
+                />
               </div>
               <div>
                 <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Repuesto</label>
-                <input value={repuesto} onChange={(e) => setRepuesto(e.target.value)} className={`${inp} mt-1`} autoComplete="off" />
+                <input
+                  value={repuesto}
+                  onChange={(e) => onCatalogoTextFilterChange("repuesto", e.target.value)}
+                  className={`${inp} mt-1`}
+                  autoComplete="off"
+                />
               </div>
               <div>
                 <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Máx. filas</label>

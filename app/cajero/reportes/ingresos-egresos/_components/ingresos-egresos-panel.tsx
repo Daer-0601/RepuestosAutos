@@ -1,11 +1,6 @@
 "use client";
 
 import { CajaMovimientoForm } from "@/app/cajero/reportes/ingresos-egresos/_components/caja-movimiento-form";
-import {
-  fmtCantidadVendida,
-  labelDetalleProductoCodigoNombre,
-  labelDetalleProductoConCantidad,
-} from "@/lib/caja/detalle-producto-label";
 import { formatoMostrarFechaBo, formatoMostrarFechaHoraBo } from "@/lib/fecha-bolivia";
 import { Loader2, Printer, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -22,15 +17,6 @@ type Movimiento = {
   cajeroUsername: string;
 };
 
-type VentaProductoDia = {
-  productoId: number;
-  codigo: string;
-  medida: string;
-  nombre: string;
-  cantidad: number;
-  totalBs: number;
-};
-
 type ReporteData = {
   fecha: string;
   sucursalNombre: string;
@@ -38,17 +24,7 @@ type ReporteData = {
   cajeroUsername: string;
   cajeroNombre: string;
   movimientos: Movimiento[];
-  ventasProductos: VentaProductoDia[];
-  ventaTotalBs: number;
-  cantidadVentasCobradas: number;
 };
-
-function ventaTotalDelDia(data: ReporteData | null): number {
-  const sistema = round2(data?.ventaTotalBs ?? 0);
-  const sumProd = round2((data?.ventasProductos ?? []).reduce((s, p) => s + p.totalBs, 0));
-  if (sistema > 0) return sistema;
-  return sumProd;
-}
 
 type CajaSolicitud = {
   id: number;
@@ -68,15 +44,6 @@ type CajaSolicitud = {
   notaCajero: string | null;
   notaAdmin: string | null;
 };
-
-function labelDetalleVentaProducto(p: VentaProductoDia): string {
-  return labelDetalleProductoConCantidad(p.codigo, p.nombre, p.cantidad);
-}
-
-function celdaCantidadVentaProducto(p: VentaProductoDia): string {
-  const cant = fmtCantidadVendida(p.cantidad);
-  return cant || "—";
-}
 
 function round2(n: number) {
   return Math.round(n * 100) / 100;
@@ -208,38 +175,12 @@ function buildReporteHtml(data: ReporteData): string {
     </tr>`;
   });
 
-  const ventas = data.ventasProductos ?? [];
-  for (const p of ventas) {
-    const ing = round2(p.totalBs);
-    if (ing <= 0) continue;
-    const sub = ing;
-    filasMov.push(`<tr class="venta-linea">
-      <td class="det">${escHtml(labelDetalleVentaProducto(p))}</td>
-      <td class="cd"><span class="chk"></span></td>
-      <td class="num">${fmtBs(ing)}</td>
-      <td class="num">0.00</td>
-      <td class="num sub">${fmtBs(sub)}</td>
-    </tr>`);
-  }
-
-  const venta = ventaTotalDelDia(data);
-  if (venta > 0) {
-    totalIngreso = round2(totalIngreso + venta);
-    filasMov.push(`<tr class="venta-total">
-      <td class="det"><strong>VENTA TOTAL</strong></td>
-      <td class="cd"><span class="chk"></span></td>
-      <td class="num">${fmtBs(venta)}</td>
-      <td class="num">0.00</td>
-      <td class="num sub">${fmtBs(venta)}</td>
-    </tr>`);
-  }
-
-  const totalNeto = round2(totalIngreso - totalEgreso);
-
   const bodyRows =
     filasMov.length > 0
       ? filasMov.join("")
       : `<tr><td colspan="5" class="empty">Sin movimientos registrados para este día.</td></tr>`;
+
+  const totalNeto = round2(totalIngreso - totalEgreso);
 
   return `<!DOCTYPE html>
 <html lang="es">
@@ -372,11 +313,6 @@ export function IngresosEgresosPanel({ fecha }: { fecha: string }) {
         cajeroUsername: json.cajeroUsername?.trim() ?? "",
         cajeroNombre: json.cajeroNombre?.trim() ?? json.cajeroUsername?.trim() ?? "",
         movimientos: Array.isArray(json.movimientos) ? json.movimientos : [],
-        ventasProductos: Array.isArray(json.ventasProductos) ? json.ventasProductos : [],
-        ventaTotalBs: Number(json.ventaTotalBs ?? 0),
-        cantidadVentasCobradas: Number(
-          (json as { cantidadVentasCobradas?: number }).cantidadVentasCobradas ?? 0
-        ),
       });
 
       try {
@@ -409,14 +345,11 @@ export function IngresosEgresosPanel({ fecha }: { fecha: string }) {
       else egr = round2(egr + m.montoBs);
       if (m.esCompraDolar && m.montoUsd != null) totalCDolar = round2(totalCDolar + m.montoUsd);
     }
-    const venta = ventaTotalDelDia(data);
-    ing = round2(ing + venta);
     return {
       ing,
       egr,
       totalCDolar,
       neto: round2(ing - egr),
-      venta,
     };
   }, [data]);
 
@@ -617,11 +550,10 @@ export function IngresosEgresosPanel({ fecha }: { fecha: string }) {
                 </tr>
               </thead>
               <tbody>
-                {(data?.movimientos ?? []).length === 0 &&
-                (data?.ventasProductos ?? []).length === 0 ? (
+                {(data?.movimientos ?? []).length === 0 ? (
                   <tr>
                     <td colSpan={5} className="px-3 py-6 text-center text-slate-500">
-                      Sin movimientos ni ventas confirmadas para este día.
+                      Sin movimientos para este día.
                     </td>
                   </tr>
                 ) : null}
@@ -651,55 +583,6 @@ export function IngresosEgresosPanel({ fecha }: { fecha: string }) {
                       </td>
                     </tr>
                   ))}
-                {(data?.ventasProductos ?? []).length > 0 ? (
-                  <>
-                    <tr className="border-t border-white/10 bg-white/[0.02]">
-                      <td
-                        colSpan={5}
-                        className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-400/90"
-                      >
-                        Ventas cobradas del día
-                        {data && data.cantidadVentasCobradas > 0 ? (
-                          <span className="ml-1 font-normal normal-case text-slate-500">
-                            ({data.cantidadVentasCobradas}{" "}
-                            {data.cantidadVentasCobradas === 1 ? "venta" : "ventas"} ·{" "}
-                            {(data.ventasProductos ?? []).length}{" "}
-                            {(data.ventasProductos ?? []).length === 1 ? "producto" : "productos"})
-                          </span>
-                        ) : null}
-                      </td>
-                    </tr>
-                    {(data?.ventasProductos ?? []).map((p) => (
-                      <tr
-                        key={`venta-${p.productoId}-${p.codigo}`}
-                        className="border-b border-white/5 text-emerald-50/90"
-                      >
-                        <td className="px-3 py-2 text-xs leading-snug">
-                          {labelDetalleProductoCodigoNombre(p.codigo, p.nombre)}
-                        </td>
-                        <td className="px-2 py-2 text-right font-mono text-sm font-semibold tabular-nums text-emerald-200">
-                          {celdaCantidadVentaProducto(p)}
-                        </td>
-                        <td className="px-3 py-2 capitalize text-emerald-300/80">ingreso</td>
-                        <td className="px-3 py-2 text-right font-mono tabular-nums text-emerald-100">
-                          {fmtBs(p.totalBs)}
-                        </td>
-                        <td className="px-3 py-2 text-right">—</td>
-                      </tr>
-                    ))}
-                  </>
-                ) : null}
-                {resumen.venta > 0 ? (
-                  <tr className="bg-emerald-500/10 font-medium text-emerald-100">
-                    <td className="px-3 py-2">VENTA TOTAL (cobrado en el día)</td>
-                    <td className="px-2 py-2 text-right">—</td>
-                    <td className="px-3 py-2">ingreso</td>
-                    <td className="px-3 py-2 text-right font-mono tabular-nums">
-                      {fmtBs(resumen.venta)}
-                    </td>
-                    <td className="px-3 py-2 text-right">—</td>
-                  </tr>
-                ) : null}
               </tbody>
             </table>
           </div>

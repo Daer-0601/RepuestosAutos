@@ -2,10 +2,7 @@ import { getCajeroStaffContextOrNull } from "@/lib/auth/staff-panel-context";
 import {
   deleteCajaMovimiento,
   listCajaMovimientosDia,
-  countVentasCobradasDiaSucursal,
-  listVentasProductosDiaSucursal,
   registrarCajaMovimiento,
-  totalVentasCobradasDiaBsReconciliado,
   type CajaMovimientoTipo,
 } from "@/lib/data/caja-movimientos";
 import { getUltimoTipoCambio } from "@/lib/data/tipo-cambio";
@@ -27,12 +24,8 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const fecha = parseIsoDateOnly(searchParams.get("fecha")) ?? defaultHoyIso();
 
-  const [movimientos, ventasProductos, ventaTotalBs, cantidadVentasCobradas, ultimoTc, u] =
-    await Promise.all([
+  const [movimientos, ultimoTc, u] = await Promise.all([
       listCajaMovimientosDia(ctx.sucursalId, fecha),
-      listVentasProductosDiaSucursal(ctx.sucursalId, fecha),
-      totalVentasCobradasDiaBsReconciliado(ctx.sucursalId, fecha),
-      countVentasCobradasDiaSucursal(ctx.sucursalId, fecha),
       getUltimoTipoCambio(),
       getUsuario(ctx.userId),
     ]);
@@ -49,9 +42,6 @@ export async function GET(request: Request) {
       cajeroUsername,
       cajeroNombre,
       movimientos,
-      ventasProductos,
-      ventaTotalBs,
-      cantidadVentasCobradas,
       tipoCambioReferencia: ultimoTc
         ? { id: ultimoTc.id, valorBsPorUsd: ultimoTc.valor_bs_por_usd }
         : null,
@@ -137,7 +127,7 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ error: "Id de movimiento no válido." }, { status: 400 });
   }
 
-  const result = await deleteCajaMovimiento(id, ctx.sucursalId);
+  const result = await deleteCajaMovimiento(id, ctx.sucursalId, ctx.userId);
   if (!result.ok) {
     return NextResponse.json({ error: result.message }, { status: 404 });
   }

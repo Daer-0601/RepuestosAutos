@@ -97,7 +97,7 @@ export function buildReporteArqueoResumenHtml(input: ArqueoResumenPrintInput): s
     </div>
     <div style="width:80px"></div>
   </header>
-  <p class="nota">Ventas confirmadas en el período. Una fila por vendedor activo de la sucursal; la última fila suma todos los montos.</p>
+  <p class="nota">Solo ventas ya cobradas en caja. Crédito Bs: créditos saldados (pendientes no suman).</p>
   <table class="items">
     <colgroup>
       <col style="width:18%" />

@@ -9,14 +9,22 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 const COL_MIN = 40;
 const cellPad = "px-2 py-1.5";
-/** Líneas verticales entre columnas (color distinto al fondo). */
-const cellBorderR = "border-r border-sky-500/35";
 
-function defaultColWidths(sucCount: number): number[] {
-  /* … P. venta Bs, luego sucursales, stock total, P. tope, acción */
-  const baseCore = [88, 72, 112, 88, 120, 220, 72, 72, 72, 88, 56, 72, 88, 88];
+function cellBorderR(variant: "admin" | "cajero") {
+  return variant === "cajero" ? "border-r border-emerald-500/35" : "border-r border-sky-500/35";
+}
+
+function defaultColWidths(
+  sucCount: number,
+  opts: { mostrarPrecioCompra: boolean; mostrarAccion: boolean }
+): number[] {
+  const baseCore = [88, 72, 112, 88, 120, 220, 72, 72, 72, 88, 56, 72];
+  if (opts.mostrarPrecioCompra) baseCore.push(88);
+  baseCore.push(88, 88);
   const suc = Array.from({ length: sucCount }, () => 128);
-  return [...baseCore, ...suc, 56, 80, 72];
+  const tail = [56, 80];
+  if (opts.mostrarAccion) tail.push(72);
+  return [...baseCore, ...suc, ...tail];
 }
 
 function filaPorStock(stockTotal: number): { tr: string; mono: string } {
@@ -31,6 +39,8 @@ export function ProductosCatalogoTabla({
   rows,
   sucursales,
   modoAccion = "editar",
+  mostrarPrecioCompra = true,
+  variant = "admin",
   sucursalReferenciaId = null,
   onAgregar,
   idsEnCarrito,
@@ -38,22 +48,59 @@ export function ProductosCatalogoTabla({
   rows: ProductoCatalogoRowConStock[];
   sucursales: SucursalRow[];
   /** En traspasos u otros pickers: botón agregar en lugar de enlace Editar. */
-  modoAccion?: "editar" | "agregar";
+  modoAccion?: "editar" | "agregar" | "solo-lectura";
+  /** Oculta columna de precio de compra (p. ej. catálogo cajero). */
+  mostrarPrecioCompra?: boolean;
+  variant?: "admin" | "cajero";
   /** Resalta la columna de stock de esta sucursal (p. ej. origen del traspaso). */
   sucursalReferenciaId?: number | null;
   onAgregar?: (row: ProductoCatalogoRowConStock) => void;
   /** Productos ya cargados en el traspaso (deshabilita agregar duplicado). */
   idsEnCarrito?: ReadonlySet<number>;
 }) {
-  const [colWidths, setColWidths] = useState<number[]>(() => defaultColWidths(sucursales.length));
+  const mostrarAccion = modoAccion !== "solo-lectura";
+  const borderR = cellBorderR(variant);
+  const resizeHandleHover =
+    variant === "cajero"
+      ? "hover:bg-emerald-500/30 active:bg-emerald-500/40"
+      : "hover:bg-sky-500/30 active:bg-sky-500/40";
+  const tableBorder =
+    variant === "cajero" ? "border-emerald-500/30" : "border-sky-500/30";
+  const theadBorder =
+    variant === "cajero" ? "border-emerald-500/45" : "border-sky-500/45";
+  const tbodyDivide =
+    variant === "cajero" ? "divide-emerald-500/30" : "divide-sky-500/30";
+  const rowRing =
+    variant === "cajero" ? "ring-emerald-400" : "ring-sky-400";
+  const rowSelectedBg =
+    variant === "cajero"
+      ? "bg-emerald-950/55 shadow-[inset_0_0_0_9999px_rgba(16,185,129,0.12)]"
+      : "bg-sky-950/55 shadow-[inset_0_0_0_9999px_rgba(56,189,248,0.12)]";
+  const sucRefBg = variant === "cajero" ? "bg-emerald-500/15 text-emerald-100" : "bg-sky-500/15 text-sky-100";
+  const sucRefCellBg = variant === "cajero" ? "bg-emerald-500/10" : "bg-sky-500/10";
+  const linkClass =
+    variant === "cajero"
+      ? "font-medium text-emerald-300 hover:text-emerald-200 hover:underline"
+      : "font-medium text-sky-300 hover:text-sky-200 hover:underline";
+  const [colWidths, setColWidths] = useState<number[]>(() =>
+    defaultColWidths(sucursales.length, { mostrarPrecioCompra, mostrarAccion })
+  );
   const resizeDragRef = useRef<{ index: number; startX: number; startWidth: number } | null>(null);
   /** Fila marcada al hacer clic (mismo clic desmarca). */
   const [marcadoId, setMarcadoId] = useState<number | null>(null);
 
   useEffect(() => {
-    const need = 17 + sucursales.length;
-    setColWidths((prev) => (prev.length === need ? prev : defaultColWidths(sucursales.length)));
-  }, [sucursales.length]);
+    const need =
+      14 +
+      (mostrarPrecioCompra ? 1 : 0) +
+      (mostrarAccion ? 1 : 0) +
+      sucursales.length;
+    setColWidths((prev) =>
+      prev.length === need
+        ? prev
+        : defaultColWidths(sucursales.length, { mostrarPrecioCompra, mostrarAccion })
+    );
+  }, [sucursales.length, mostrarPrecioCompra, mostrarAccion]);
 
   useEffect(() => {
     setMarcadoId((id) => {
@@ -77,13 +124,14 @@ export function ProductosCatalogoTabla({
       "Proveedor",
       "Marca",
       "Unidad",
-      "P. compra",
-      "P. venta USD",
-      "P. venta Bs",
     ];
+    if (mostrarPrecioCompra) base.push("P. compra");
+    base.push("P. venta USD", "P. venta Bs");
     const suc = sucursales.map((s) => s.nombre);
-    return [...base, ...suc, "Stock", "P. tope", "Acción"];
-  }, [sucursales]);
+    const tail = ["Stock", "P. tope"];
+    if (mostrarAccion) tail.push("Acción");
+    return [...base, ...suc, ...tail];
+  }, [sucursales, mostrarPrecioCompra, mostrarAccion]);
 
   const onColumnResizeMove = useCallback((e: MouseEvent) => {
     const d = resizeDragRef.current;
@@ -127,7 +175,7 @@ export function ProductosCatalogoTabla({
   const resizeHandle = useCallback(
     (colIndex: number, label: string) => (
       <span
-        className="absolute right-0 top-0 z-20 h-full w-4 min-w-[14px] max-w-[18px] cursor-col-resize hover:bg-sky-500/30 active:bg-sky-500/40"
+        className={`absolute right-0 top-0 z-20 h-full w-4 min-w-[14px] max-w-[18px] cursor-col-resize ${resizeHandleHover}`}
         style={{ transform: "translateX(50%)" }}
         onMouseDown={(e) => beginColumnResize(e, colIndex)}
         onClick={(e) => e.stopPropagation()}
@@ -136,22 +184,24 @@ export function ProductosCatalogoTabla({
         aria-label={`Redimensionar columna ${label || colIndex}`}
       />
     ),
-    [beginColumnResize]
+    [beginColumnResize, resizeHandleHover]
   );
 
   const nSuc = sucursales.length;
-  const colSpan = 17 + nSuc;
+  const colSpan = labels.length;
+  const idxPrecioVentaUsd = 11 + (mostrarPrecioCompra ? 1 : 0);
+  const idxPrecioVentaBs = idxPrecioVentaUsd + 1;
   /** Primera columna de stock por sucursal (después de P. venta Bs). */
-  const idxSucStart = 14;
+  const idxSucStart = idxPrecioVentaBs + 1;
   /** Stock total general, después de todas las sucursales. */
-  const idxStockTotal = 14 + nSuc;
+  const idxStockTotal = idxSucStart + nSuc;
   const idxPtope = idxStockTotal + 1;
-  const idxAccion = labels.length - 1;
+  const idxAccion = mostrarAccion ? idxPtope + 1 : -1;
 
   return (
     <div className="max-h-[min(75dvh,720px)] overflow-y-auto overflow-x-auto rounded-2xl border border-white/10 bg-slate-900/40 overscroll-contain">
       <table
-        className="table-fixed border-collapse border border-sky-500/30 text-left text-xs"
+        className={`table-fixed border-collapse border ${tableBorder} text-left text-xs`}
         style={{ width: tablaAnchoPx, minWidth: tablaAnchoPx }}
       >
         <colgroup>
@@ -159,7 +209,7 @@ export function ProductosCatalogoTabla({
             <col key={i} style={{ width: w }} />
           ))}
         </colgroup>
-        <thead className="sticky top-0 z-[1] border-b-2 border-sky-500/45 bg-slate-950/95 text-[10px] font-semibold uppercase tracking-wide text-slate-500 shadow-sm shadow-black/20">
+        <thead className={`sticky top-0 z-[1] border-b-2 ${theadBorder} bg-slate-950/95 text-[10px] font-semibold uppercase tracking-wide text-slate-500 shadow-sm shadow-black/20`}>
           <tr>
             {labels.map((label, i) => {
               const isSuc = i >= idxSucStart && i < idxSucStart + nSuc;
@@ -173,7 +223,7 @@ export function ProductosCatalogoTabla({
               return (
                 <th
                   key={isSuc && sucursalCol ? `suc-${sucursalCol.id}` : `col-${i}`}
-                  className={`${cellPad} ${cellBorderR} relative select-none ${isSuc || i === idxStockTotal ? "text-center" : ""} ${isAccion ? "text-right" : ""} ${isSuc ? "align-bottom font-medium normal-case text-slate-300" : ""} ${esSucRef ? "bg-sky-500/15 text-sky-100" : ""}`}
+                  className={`${cellPad} ${borderR} relative select-none ${isSuc || i === idxStockTotal ? "text-center" : ""} ${isAccion ? "text-right" : ""} ${isSuc ? "align-bottom font-medium normal-case text-slate-300" : ""} ${esSucRef ? sucRefBg : ""}`}
                   title={thTitle}
                 >
                   <span
@@ -193,7 +243,7 @@ export function ProductosCatalogoTabla({
             })}
           </tr>
         </thead>
-        <tbody className="divide-y divide-sky-500/30">
+        <tbody className={`divide-y ${tbodyDivide}`}>
           {rows.length === 0 ? (
             <tr>
               <td colSpan={colSpan} className="px-4 py-10 text-center text-slate-500">
@@ -226,11 +276,11 @@ export function ProductosCatalogoTabla({
                   }}
                   className={`cursor-pointer transition-colors ${bg} ${tone.tr} hover:brightness-110 ${
                     seleccionado
-                      ? "relative z-[1] ring-2 ring-inset ring-sky-400 bg-sky-950/55 shadow-[inset_0_0_0_9999px_rgba(56,189,248,0.12)]"
+                      ? `relative z-[1] ring-2 ring-inset ${rowRing} ${rowSelectedBg}`
                       : ""
                   }`}
                 >
-                  <td className={`${cellPad} ${cellBorderR} relative whitespace-nowrap`}>
+                  <td className={`${cellPad} ${borderR} relative whitespace-nowrap`}>
                     <ProductoQrImagenesControls
                       codigo={r.codigo}
                       qrPayload={r.qr_payload}
@@ -240,66 +290,68 @@ export function ProductosCatalogoTabla({
                     />
                     {resizeHandle(0, labels[0] || "QR")}
                   </td>
-                  <td className={`${cellPad} ${cellBorderR} relative truncate font-mono ${tone.mono}`}>
+                  <td className={`${cellPad} ${borderR} relative truncate font-mono ${tone.mono}`}>
                     {r.codigo}
                     {resizeHandle(1, labels[1])}
                   </td>
-                  <td className={`${cellPad} ${cellBorderR} relative truncate font-mono ${tone.mono}`}>
+                  <td className={`${cellPad} ${borderR} relative truncate font-mono ${tone.mono}`}>
                     {r.codigo_pieza ?? "—"}
                     {resizeHandle(2, labels[2])}
                   </td>
-                  <td className={`${cellPad} ${cellBorderR} relative truncate`}>
+                  <td className={`${cellPad} ${borderR} relative truncate`}>
                     {r.especificacion ?? "—"}
                     {resizeHandle(3, labels[3])}
                   </td>
-                  <td className={`${cellPad} ${cellBorderR} relative truncate text-[11px] font-mono ${tone.mono}`} title={r.medida ?? ""}>
+                  <td className={`${cellPad} ${borderR} relative truncate text-[11px] font-mono ${tone.mono}`} title={r.medida ?? ""}>
                     {r.medida ?? "—"}
                     {resizeHandle(4, labels[4])}
                   </td>
-                  <td className={`${cellPad} ${cellBorderR} relative truncate font-medium`} title={r.descripcion ?? ""}>
+                  <td className={`${cellPad} ${borderR} relative truncate font-medium`} title={r.descripcion ?? ""}>
                     {r.descripcion ?? r.nombre}
                     {resizeHandle(5, labels[5])}
                   </td>
-                  <td className={`${cellPad} ${cellBorderR} relative truncate`}>
+                  <td className={`${cellPad} ${borderR} relative truncate`}>
                     {r.repuesto ?? "—"}
                     {resizeHandle(6, labels[6])}
                   </td>
-                  <td className={`${cellPad} ${cellBorderR} relative truncate`}>
+                  <td className={`${cellPad} ${borderR} relative truncate`}>
                     {r.procedencia ?? "—"}
                     {resizeHandle(7, labels[7])}
                   </td>
-                  <td className={`${cellPad} ${cellBorderR} relative truncate opacity-80`}>
+                  <td className={`${cellPad} ${borderR} relative truncate opacity-80`}>
                     {r.proveedor_nombre ?? "—"}
                     {resizeHandle(8, labels[8])}
                   </td>
-                  <td className={`${cellPad} ${cellBorderR} relative truncate`}>
+                  <td className={`${cellPad} ${borderR} relative truncate`}>
                     {r.marca_auto ?? "—"}
                     {resizeHandle(9, labels[9])}
                   </td>
-                  <td className={`${cellPad} ${cellBorderR} relative truncate`}>
+                  <td className={`${cellPad} ${borderR} relative truncate`}>
                     {r.unidad ?? "—"}
                     {resizeHandle(10, labels[10])}
                   </td>
-                  <td
-                    className={`${cellPad} ${cellBorderR} relative truncate font-mono ${tone.mono}`}
-                    title={
-                      r.precio_compra_unitario_usd
-                        ? `Última compra · USD unit.: ${r.precio_compra_unitario_usd}`
-                        : r.precio_compra_unitario_bs
-                          ? "Última compra confirmada (unitario Bs)"
-                          : undefined
-                    }
-                  >
-                    {r.precio_compra_unitario_bs ?? "—"}
-                    {resizeHandle(11, labels[11])}
-                  </td>
-                  <td className={`${cellPad} ${cellBorderR} relative truncate font-mono ${tone.mono}`}>
+                  {mostrarPrecioCompra ? (
+                    <td
+                      className={`${cellPad} ${borderR} relative truncate font-mono ${tone.mono}`}
+                      title={
+                        r.precio_compra_unitario_usd
+                          ? `Última compra · USD unit.: ${r.precio_compra_unitario_usd}`
+                          : r.precio_compra_unitario_bs
+                            ? "Última compra confirmada (unitario Bs)"
+                            : undefined
+                      }
+                    >
+                      {r.precio_compra_unitario_bs ?? "—"}
+                      {resizeHandle(idxPrecioVentaUsd - 1, labels[idxPrecioVentaUsd - 1] ?? "P. compra")}
+                    </td>
+                  ) : null}
+                  <td className={`${cellPad} ${borderR} relative truncate font-mono ${tone.mono}`}>
                     {r.precio_venta_lista_usd ?? "—"}
-                    {resizeHandle(12, labels[12])}
+                    {resizeHandle(idxPrecioVentaUsd, labels[idxPrecioVentaUsd] ?? "P. venta USD")}
                   </td>
-                  <td className={`${cellPad} ${cellBorderR} relative truncate font-mono ${tone.mono}`}>
+                  <td className={`${cellPad} ${borderR} relative truncate font-mono ${tone.mono}`}>
                     {r.precio_venta_lista_bs ?? "—"}
-                    {resizeHandle(13, labels[13])}
+                    {resizeHandle(idxPrecioVentaBs, labels[idxPrecioVentaBs] ?? "P. venta Bs")}
                   </td>
                   {sucursales.map((s, si) => {
                     const q = r.stocksPorSucursal.get(s.id) ?? 0;
@@ -309,63 +361,65 @@ export function ProductosCatalogoTabla({
                     return (
                       <td
                         key={s.id}
-                        className={`${cellPad} ${cellBorderR} relative text-center font-mono ${tone.mono} ${esSucRef ? "bg-sky-500/10 font-semibold" : ""}`}
+                        className={`${cellPad} ${borderR} relative text-center font-mono ${tone.mono} ${esSucRef ? `${sucRefCellBg} font-semibold` : ""}`}
                       >
                         {q}
                         {resizeHandle(colI, labels[colI] ?? s.nombre)}
                       </td>
                     );
                   })}
-                  <td className={`${cellPad} ${cellBorderR} relative truncate text-center font-semibold font-mono ${tone.mono}`}>
+                  <td className={`${cellPad} ${borderR} relative truncate text-center font-semibold font-mono ${tone.mono}`}>
                     {r.stock_total}
                     {resizeHandle(idxStockTotal, labels[idxStockTotal])}
                   </td>
-                  <td className={`${cellPad} ${cellBorderR} relative truncate font-mono ${tone.mono}`}>
+                  <td className={`${cellPad} ${borderR} relative truncate font-mono ${tone.mono}`}>
                     {r.punto_tope ?? "—"}
                     {resizeHandle(idxPtope, labels[idxPtope])}
                   </td>
-                  <td className={`${cellPad} ${cellBorderR} relative text-right`}>
-                    {modoAccion === "agregar" && onAgregar ? (
-                      (() => {
-                        const stockRef =
-                          sucursalReferenciaId != null
-                            ? r.stocksPorSucursal.get(sucursalReferenciaId) ?? 0
-                            : r.stock_total;
-                        const yaEnLista = idsEnCarrito?.has(r.id) ?? false;
-                        const puede = stockRef > 0;
-                        return (
-                          <button
-                            type="button"
-                            disabled={!puede}
-                            title={
-                              stockRef < 1
-                                ? "Sin stock en la sucursal origen."
-                                : yaEnLista
-                                  ? "Sumar una unidad más al traspaso"
-                                  : "Agregar al traspaso"
-                            }
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (puede) onAgregar(r);
-                            }}
-                            className="inline-flex items-center gap-1 rounded-lg border border-sky-500/35 bg-sky-500/15 px-2.5 py-1 text-[11px] font-medium text-sky-100 transition hover:bg-sky-500/25 disabled:cursor-not-allowed disabled:opacity-35"
-                          >
-                            <ShoppingCart className="h-3.5 w-3.5" strokeWidth={2} />
-                            {yaEnLista ? "+1" : "Agregar"}
-                          </button>
-                        );
-                      })()
-                    ) : (
-                      <Link
-                        href={`/admin/productos/${r.id}`}
-                        className="font-medium text-sky-300 hover:text-sky-200 hover:underline"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        Editar
-                      </Link>
-                    )}
-                    {resizeHandle(idxAccion, labels[idxAccion])}
-                  </td>
+                  {mostrarAccion ? (
+                    <td className={`${cellPad} ${borderR} relative text-right`}>
+                      {modoAccion === "agregar" && onAgregar ? (
+                        (() => {
+                          const stockRef =
+                            sucursalReferenciaId != null
+                              ? r.stocksPorSucursal.get(sucursalReferenciaId) ?? 0
+                              : r.stock_total;
+                          const yaEnLista = idsEnCarrito?.has(r.id) ?? false;
+                          const puede = stockRef > 0;
+                          return (
+                            <button
+                              type="button"
+                              disabled={!puede}
+                              title={
+                                stockRef < 1
+                                  ? "Sin stock en la sucursal origen."
+                                  : yaEnLista
+                                    ? "Sumar una unidad más al traspaso"
+                                    : "Agregar al traspaso"
+                              }
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (puede) onAgregar(r);
+                              }}
+                              className="inline-flex items-center gap-1 rounded-lg border border-sky-500/35 bg-sky-500/15 px-2.5 py-1 text-[11px] font-medium text-sky-100 transition hover:bg-sky-500/25 disabled:cursor-not-allowed disabled:opacity-35"
+                            >
+                              <ShoppingCart className="h-3.5 w-3.5" strokeWidth={2} />
+                              {yaEnLista ? "+1" : "Agregar"}
+                            </button>
+                          );
+                        })()
+                      ) : (
+                        <Link
+                          href={`/admin/productos/${r.id}`}
+                          className={linkClass}
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          Editar
+                        </Link>
+                      )}
+                      {resizeHandle(idxAccion, labels[idxAccion] ?? "Acción")}
+                    </td>
+                  ) : null}
                 </tr>
               );
             })

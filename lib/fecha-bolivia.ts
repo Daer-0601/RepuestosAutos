@@ -88,6 +88,34 @@ export function ventasRangoFechaSql(
   };
 }
 
+/**
+ * Ventas cobradas por día calendario según `fecha_cobro` (dinero que entró en caja ese día).
+ */
+export function ventasCobroRangoFechaSql(
+  fechaDesde: string,
+  fechaHasta: string,
+  alias = "v"
+): { clause: string; params: [string, string] } {
+  const d1 = fechaDesde.trim();
+  const d2 = fechaHasta.trim();
+  return {
+    clause: `AND ${alias}.estado_cobro = 'cobrado' AND ${alias}.fecha_cobro IS NOT NULL AND ${alias}.fecha_cobro >= ? AND ${alias}.fecha_cobro < DATE_ADD(?, INTERVAL 1 DAY)`,
+    params: [`${d1} 00:00:00`, `${d2} 00:00:00`],
+  };
+}
+
+/** Rango de un solo día para movimientos de caja (DATETIME en hora Bolivia). */
+export function diaRangoDatetimeSql(
+  fecha: string,
+  columna: string
+): { clause: string; params: [string, string] } {
+  const f = fecha.trim();
+  return {
+    clause: `AND ${columna} >= ? AND ${columna} < DATE_ADD(?, INTERVAL 1 DAY)`,
+    params: [`${f} 00:00:00`, `${f} 00:00:00`],
+  };
+}
+
 /** Muestra una fecha `YYYY-MM-DD` en formato corto Bolivia. */
 export function formatIsoDateOnlyBo(iso: string): string {
   const p = parseIsoDateOnly(iso);

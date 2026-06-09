@@ -1,37 +1,60 @@
 "use client";
 
-export type CatalogoTextFilterName =
-  | "q"
-  | "codigo"
-  | "codigo_pieza"
-  | "especificacion"
-  | "medida"
-  | "descripcion"
-  | "repuesto";
+import {
+  applyCatalogoTextFilterChange,
+  emptyCatalogoTextFilters,
+  type CatalogoTextFilterName,
+  type CatalogoTextFilterValues,
+} from "@/lib/catalogo-filtros-texto";
+import { createContext, useContext, useMemo, useState } from "react";
 
-/**
- * Input de filtro del catálogo (GET). Sin limpiar otros campos al enfocar: eso borraba «Código»
- * si el usuario pasaba el foco a otro campo antes de «Buscar». La deduplicación `q` vs `codigo`
- * se resuelve en el servidor (`parseCatalogoFiltrosCore`).
- */
+const CatalogoSearchContext = createContext<{
+  values: CatalogoTextFilterValues;
+  setField: (name: CatalogoTextFilterName, value: string) => void;
+} | null>(null);
+
+export function CatalogoSearchProvider({
+  initial,
+  children,
+}: {
+  initial: CatalogoTextFilterValues;
+  children: React.ReactNode;
+}) {
+  const [values, setValues] = useState(initial);
+
+  const setField = (name: CatalogoTextFilterName, value: string) => {
+    setValues((prev) => applyCatalogoTextFilterChange(name, value, prev));
+  };
+
+  const ctx = useMemo(() => ({ values, setField }), [values]);
+
+  return <CatalogoSearchContext.Provider value={ctx}>{children}</CatalogoSearchContext.Provider>;
+}
+
 export function CatalogoSearchInput({
   name,
-  defaultValue,
   placeholder,
   className,
 }: {
   name: CatalogoTextFilterName;
-  defaultValue: string;
   placeholder?: string;
   className?: string;
 }) {
+  const ctx = useContext(CatalogoSearchContext);
+  if (!ctx) {
+    throw new Error("CatalogoSearchInput debe usarse dentro de CatalogoSearchProvider");
+  }
+
   return (
     <input
       name={name}
-      defaultValue={defaultValue}
+      value={ctx.values[name]}
+      onChange={(e) => ctx.setField(name, e.target.value)}
       placeholder={placeholder}
       autoComplete="off"
       className={className}
     />
   );
 }
+
+export { emptyCatalogoTextFilters, type CatalogoTextFilterName, type CatalogoTextFilterValues };

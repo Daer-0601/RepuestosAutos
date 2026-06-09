@@ -45,6 +45,7 @@ export type CompraDetalleLineaRow = {
   codigoPieza: string;
   medida: string;
   nombre: string;
+  repuesto: string | null;
   marcaAuto: string | null;
   procedencia: string | null;
   unidad: string | null;
@@ -53,7 +54,9 @@ export type CompraDetalleLineaRow = {
   precioCompraUnitUsd: number;
   montoFleteBs: number;
   subtotalLineaBs: number;
+  subtotalLineaUsd: number;
   totalLineaBs: number;
+  totalLineaUsd: number;
 };
 
 export async function listComprasAdmin(
@@ -183,11 +186,13 @@ export async function getCompraDetalleAdmin(compraId: number): Promise<{
   const [lineaRows] = await pool.query<RowDataPacket[]>(
     `SELECT cd.id, cd.producto_id, cd.cantidad,
             cd.precio_compra_unitario_bs, cd.precio_compra_unitario_usd,
-            cd.monto_flete_prorrateado_bs, cd.subtotal_linea_bs, cd.total_linea_bs,
+            cd.monto_flete_prorrateado_bs, cd.subtotal_linea_bs, cd.subtotal_linea_usd,
+            cd.total_linea_bs, cd.total_linea_usd,
             COALESCE(NULLIF(TRIM(p.codigo), ''), '—') AS codigo,
             COALESCE(NULLIF(TRIM(p.codigo_pieza), ''), '—') AS codigo_pieza,
             COALESCE(NULLIF(TRIM(p.medida), ''), '—') AS medida,
             COALESCE(NULLIF(TRIM(p.nombre), ''), '—') AS nombre,
+            NULLIF(TRIM(p.repuesto), '') AS repuesto,
             NULLIF(TRIM(p.marca_auto), '') AS marca_auto,
             NULLIF(TRIM(p.procedencia), '') AS procedencia,
             NULLIF(TRIM(p.unidad), '') AS unidad
@@ -229,6 +234,7 @@ export async function getCompraDetalleAdmin(compraId: number): Promise<{
       codigoPieza: String(r.codigo_pieza ?? "—"),
       medida: String(r.medida ?? "—"),
       nombre: String(r.nombre ?? "—"),
+      repuesto: r.repuesto != null && String(r.repuesto).trim() !== "" ? String(r.repuesto) : null,
       marcaAuto: r.marca_auto != null && String(r.marca_auto).trim() !== "" ? String(r.marca_auto) : null,
       procedencia: r.procedencia != null && String(r.procedencia).trim() !== "" ? String(r.procedencia) : null,
       unidad: r.unidad != null && String(r.unidad).trim() !== "" ? String(r.unidad) : null,
@@ -237,7 +243,9 @@ export async function getCompraDetalleAdmin(compraId: number): Promise<{
       precioCompraUnitUsd: Number(r.precio_compra_unitario_usd ?? 0),
       montoFleteBs: Number(r.monto_flete_prorrateado_bs ?? 0),
       subtotalLineaBs: Number(r.subtotal_linea_bs ?? 0),
+      subtotalLineaUsd: Number(r.subtotal_linea_usd ?? 0),
       totalLineaBs: Number(r.total_linea_bs ?? 0),
+      totalLineaUsd: Number(r.total_linea_usd ?? 0),
     })),
   };
 }

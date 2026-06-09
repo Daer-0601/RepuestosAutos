@@ -8,6 +8,7 @@ import {
   LayoutDashboard,
   LogOut,
   Menu,
+  Package,
   Receipt,
   Wallet,
   X,
@@ -18,6 +19,7 @@ import { useState } from "react";
 
 const nav = [
   { href: "/cajero", label: "Inicio", icon: LayoutDashboard, exact: true },
+  { href: "/cajero/productos", label: "Productos", icon: Package },
   { href: "/cajero/cobros", label: "Cobros vendedores", icon: Receipt },
   { href: "/cajero/cotizaciones", label: "Cotizaciones", icon: FileText },
   { href: "/cajero/reportes/ingresos-egresos", label: "Ingresos / egresos", icon: ArrowDownUp },

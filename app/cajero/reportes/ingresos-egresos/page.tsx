@@ -1,6 +1,6 @@
+import { IngresosEgresosFiltroDia } from "@/app/cajero/reportes/ingresos-egresos/_components/ingresos-egresos-filtro-dia";
 import { IngresosEgresosPanel } from "@/app/cajero/reportes/ingresos-egresos/_components/ingresos-egresos-panel";
 import { PanelSection } from "@/app/_components/panel-section";
-import { VentasHistorialFiltroFechas } from "@/app/vendedor/ventas/_components/ventas-historial-filtro-fechas";
 import { requireCajeroContext } from "@/lib/auth/staff-panel-context";
 import { formatDateTimeMysqlBolivia, parseIsoDateOnly } from "@/lib/fecha-bolivia";
 import type { Metadata } from "next";
@@ -13,56 +13,48 @@ export const metadata: Metadata = {
 export default async function CajeroIngresosEgresosPage({
   searchParams,
 }: {
-  searchParams: Promise<{ desde?: string; hasta?: string }>;
+  searchParams: Promise<{ fecha?: string; desde?: string; hasta?: string }>;
 }) {
   await requireCajeroContext();
   const sp = await searchParams;
   const hoy = formatDateTimeMysqlBolivia(new Date()).slice(0, 10);
+
+  const fechaParam = sp.fecha?.trim() ?? "";
   const desdeParam = sp.desde?.trim() ?? "";
   const hastaParam = sp.hasta?.trim() ?? "";
 
-  if (desdeParam === "" && hastaParam === "") {
-    redirect(`/cajero/reportes/ingresos-egresos?desde=${hoy}&hasta=${hoy}`);
+  if (!fechaParam && (desdeParam || hastaParam)) {
+    const desdeParsed = desdeParam ? parseIsoDateOnly(desdeParam) : null;
+    const hastaParsed = hastaParam ? parseIsoDateOnly(hastaParam) : null;
+    const legacy =
+      desdeParsed && hastaParsed && desdeParsed === hastaParsed
+        ? desdeParsed
+        : desdeParsed ?? hastaParsed;
+    if (legacy) {
+      redirect(`/cajero/reportes/ingresos-egresos?fecha=${legacy}`);
+    }
   }
 
-  const desdeParsed = desdeParam ? parseIsoDateOnly(desdeParam) : null;
-  const hastaParsed = hastaParam ? parseIsoDateOnly(hastaParam) : null;
+  if (!fechaParam && !desdeParam && !hastaParam) {
+    redirect(`/cajero/reportes/ingresos-egresos?fecha=${hoy}`);
+  }
+
+  const fechaParsed = fechaParam ? parseIsoDateOnly(fechaParam) : null;
 
   let filtroError: string | null = null;
-  if (desdeParam && !desdeParsed) {
-    filtroError = "La fecha «Desde» no es válida.";
-  } else if (hastaParam && !hastaParsed) {
-    filtroError = "La fecha «Hasta» no es válida.";
+  if (fechaParam && !fechaParsed) {
+    filtroError = "La fecha no es válida.";
   }
 
-  let fDesde = desdeParsed;
-  let fHasta = hastaParsed;
-  if (fDesde && !fHasta) fHasta = fDesde;
-  if (!fDesde && fHasta) fDesde = fHasta;
-  if (fDesde && fHasta && fDesde > fHasta) {
-    const t = fDesde;
-    fDesde = fHasta;
-    fHasta = t;
-  }
-
-  const hayParamsFiltro = desdeParam !== "" || hastaParam !== "";
-  const useFiltro = Boolean(fDesde && fHasta && !filtroError);
-  const apiFecha = useFiltro ? fDesde! : hoy;
-
-  if (useFiltro && fDesde !== fHasta) {
-    filtroError =
-      filtroError ??
-      "Para ingresos y egresos elegí el mismo día en «Desde» y «Hasta» (reporte diario).";
-  }
-
-  const clearHref = `/cajero/reportes/ingresos-egresos?desde=${hoy}&hasta=${hoy}`;
+  const apiFecha = fechaParsed ?? hoy;
+  const clearHref = `/cajero/reportes/ingresos-egresos?fecha=${hoy}`;
 
   return (
     <PanelSection
       variant="cajero"
       wide
       title="Ingresos y egresos del día"
-      description="Registrá gastos, devoluciones, cambios de producto, compra de dólares e imprimí el reporte del día con ventas confirmadas."
+      description="Registrá gastos, devoluciones, cambios de producto, compra de dólares e imprimí el reporte del día."
     >
       {filtroError ? (
         <p
@@ -74,20 +66,10 @@ export default async function CajeroIngresosEgresosPage({
       ) : null}
 
       <div className="mb-6">
-        <VentasHistorialFiltroFechas
-          defaultDesde={desdeParsed}
-          defaultHasta={hastaParsed}
-          hayParamsFiltro={hayParamsFiltro}
-          formAction="/cajero/reportes/ingresos-egresos"
-          clearHref={clearHref}
-          accent="cajero"
-          fieldIdPrefix="ie"
-        />
+        <IngresosEgresosFiltroDia defaultFecha={fechaParsed} clearHref={clearHref} />
       </div>
 
-      {!filtroError ? (
-        <IngresosEgresosPanel fecha={apiFecha} />
-      ) : null}
+      {!filtroError ? <IngresosEgresosPanel fecha={apiFecha} /> : null}
     </PanelSection>
   );
 }

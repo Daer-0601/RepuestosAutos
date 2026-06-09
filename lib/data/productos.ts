@@ -441,6 +441,8 @@ export async function replaceProductoImagenesWithConnection(
 
 /**
  * Recalcula precio de venta en Bs usando el precio USD de cada producto.
+ * Si hay punto tope, conserva la misma diferencia absoluta respecto al precio lista
+ * (nuevo_tope = nuevo_lista + (tope_anterior - lista_anterior)).
  * Devuelve la cantidad de filas afectadas.
  */
 export async function refreshPrecioVentaBsDesdeTipoCambio(valorBsPorUsd: number): Promise<number> {
@@ -448,9 +450,14 @@ export async function refreshPrecioVentaBsDesdeTipoCambio(valorBsPorUsd: number)
   if (!Number.isFinite(tc) || tc <= 0) return 0;
   const [res] = await pool.execute<ResultSetHeader>(
     `UPDATE productos
-     SET precio_venta_lista_bs = ROUND(precio_venta_lista_usd * ?, 2)
+     SET punto_tope = CASE
+           WHEN punto_tope IS NOT NULL AND precio_venta_lista_bs IS NOT NULL
+           THEN ROUND(ROUND(precio_venta_lista_usd * ?, 2) + (punto_tope - precio_venta_lista_bs), 2)
+           ELSE punto_tope
+         END,
+         precio_venta_lista_bs = ROUND(precio_venta_lista_usd * ?, 2)
      WHERE precio_venta_lista_usd IS NOT NULL`,
-    [tc]
+    [tc, tc]
   );
   return res.affectedRows;
 }

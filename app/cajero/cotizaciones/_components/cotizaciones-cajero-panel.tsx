@@ -186,8 +186,6 @@ export function CotizacionesCajeroPanel({
           totalLineaBs: ln.totalLineaBs,
         })),
       });
-      imprimirHtml(doc, (text) => setMsg({ type: "err", text }));
-
       const res = await fetch("/api/cajero/cotizaciones-pendientes/imprimir", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -198,6 +196,8 @@ export function CotizacionesCajeroPanel({
         setMsg({ type: "err", text: data.error ?? "No se pudo registrar la impresión." });
         return;
       }
+
+      imprimirHtml(doc, (text) => setMsg({ type: "err", text }));
       setMsg({ type: "ok", text: `Cotización #${detalle.id} impresa y registrada.` });
       cerrarDetalle();
       void cargarLista({ silent: true });
