@@ -320,6 +320,7 @@ export type VentaDetalleProductoRow = {
   codigoPieza: string;
   medida: string;
   nombre: string;
+  repuesto: string | null;
   marcaAuto: string | null;
   procedencia: string | null;
   unidad: string | null;
@@ -345,6 +346,7 @@ export async function listVentasDetalleProductosPorIds(
             COALESCE(NULLIF(TRIM(p.codigo_pieza), ''), '—') AS codigo_pieza,
             COALESCE(NULLIF(TRIM(p.medida), ''), '—') AS medida,
             COALESCE(NULLIF(TRIM(p.nombre), ''), '—') AS nombre,
+            NULLIF(TRIM(p.repuesto), '') AS repuesto,
             NULLIF(TRIM(p.marca_auto), '') AS marca_auto,
             NULLIF(TRIM(p.procedencia), '') AS procedencia,
             NULLIF(TRIM(p.unidad), '') AS unidad
@@ -362,6 +364,7 @@ export async function listVentasDetalleProductosPorIds(
     codigoPieza: String(r.codigo_pieza ?? "—"),
     medida: String(r.medida ?? "—"),
     nombre: String(r.nombre ?? "—"),
+    repuesto: r.repuesto != null && String(r.repuesto).trim() !== "" ? String(r.repuesto) : null,
     marcaAuto: r.marca_auto != null && String(r.marca_auto).trim() !== "" ? String(r.marca_auto) : null,
     procedencia: r.procedencia != null && String(r.procedencia).trim() !== "" ? String(r.procedencia) : null,
     unidad: r.unidad != null && String(r.unidad).trim() !== "" ? String(r.unidad) : null,
