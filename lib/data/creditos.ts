@@ -288,6 +288,75 @@ export async function listCreditosPendientesSucursal(
   });
 }
 
+export type CobroCreditoRow = {
+  pagoId: number;
+  creditoId: number;
+  ventaId: number;
+  numeroDocumento: string | null;
+  clienteNombre: string;
+  vendedorNombre: string;
+  montoBs: number;
+  tipoPago: "efectivo" | "qr" | "tarjeta";
+  fecha: string;
+  cajeroNombre: string;
+};
+
+/** Cobros de crédito registrados en caja (por fecha de pago, calendario Bolivia). */
+export async function listCobrosCreditoSucursal(
+  sucursalId: number,
+  fechaDesde: string,
+  fechaHasta: string
+): Promise<CobroCreditoRow[]> {
+  await ensureCreditosSchema();
+  if (!Number.isFinite(sucursalId) || sucursalId < 1) return [];
+  const d1 = fechaDesde.trim();
+  const d2 = fechaHasta.trim();
+  if (!d1 || !d2) return [];
+
+  const [rows] = await pool.execute<RowDataPacket[]>(
+    `SELECT pc.id AS pago_id,
+            pc.credito_id,
+            cr.venta_id,
+            v.numero_documento,
+            COALESCE(NULLIF(TRIM(c.nombre), ''), '—') AS cliente_nombre,
+            COALESCE(NULLIF(TRIM(u.nombre_completo), ''), NULLIF(TRIM(u.username), ''), '—') AS vendedor_nombre,
+            pc.monto_bs,
+            pc.tipo_pago,
+            pc.fecha,
+            COALESCE(NULLIF(TRIM(uc.nombre_completo), ''), NULLIF(TRIM(uc.username), ''), '—') AS cajero_nombre
+     FROM pagos_credito pc
+     INNER JOIN creditos cr ON cr.id = pc.credito_id
+     INNER JOIN ventas v ON v.id = cr.venta_id
+     INNER JOIN clientes c ON c.id = COALESCE(NULLIF(cr.cliente_id, 0), v.cliente_id)
+     INNER JOIN usuarios u ON u.id = v.usuario_id
+     LEFT JOIN usuarios uc ON uc.id = pc.cajero_usuario_id
+     WHERE COALESCE(NULLIF(cr.sucursal_id, 0), v.sucursal_id) = ?
+       AND pc.fecha IS NOT NULL
+       AND pc.fecha >= ? AND pc.fecha < DATE_ADD(?, INTERVAL 1 DAY)
+     ORDER BY pc.fecha DESC, pc.id DESC`,
+    [sucursalId, `${d1} 00:00:00`, `${d2} 00:00:00`]
+  );
+
+  return (rows as RowDataPacket[]).map((r) => ({
+    pagoId: Number(r.pago_id),
+    creditoId: Number(r.credito_id),
+    ventaId: Number(r.venta_id),
+    numeroDocumento:
+      r.numero_documento != null && String(r.numero_documento).trim() !== ""
+        ? String(r.numero_documento).trim()
+        : null,
+    clienteNombre: String(r.cliente_nombre ?? "").trim() || "—",
+    vendedorNombre: String(r.vendedor_nombre ?? "").trim() || "—",
+    montoBs: round2(Number(r.monto_bs ?? 0)),
+    tipoPago: String(r.tipo_pago ?? "efectivo") as CobroCreditoRow["tipoPago"],
+    fecha:
+      r.fecha instanceof Date
+        ? formatDateTimeMysqlBolivia(r.fecha)
+        : String(r.fecha ?? ""),
+    cajeroNombre: String(r.cajero_nombre ?? "").trim() || "—",
+  }));
+}
+
 export type ClienteCreditoPendienteBusquedaRow = {
   id: number;
   nombre: string;
@@ -801,8 +870,11 @@ export async function registrarPagoCreditoCajero(input: {
     await conn.beginTransaction();
 
     const [rows] = await conn.execute<RowDataPacket[]>(
-      `SELECT cr.id, cr.venta_id, cr.cliente_id, cr.saldo_pendiente_bs, cr.estado
+      `SELECT cr.id, cr.venta_id, cr.cliente_id, cr.saldo_pendiente_bs, cr.estado,
+              COALESCE(NULLIF(TRIM(c.nombre), ''), 'Cliente') AS cliente_nombre
        FROM creditos cr
+       INNER JOIN ventas v ON v.id = cr.venta_id
+       LEFT JOIN clientes c ON c.id = COALESCE(NULLIF(cr.cliente_id, 0), v.cliente_id)
        WHERE cr.id = ? AND cr.sucursal_id = ?
        FOR UPDATE`,
       [input.creditoId, input.sucursalId]
@@ -842,6 +914,22 @@ export async function registrarPagoCreditoCajero(input: {
        WHERE id = ?`,
       [input.tipoPago, input.cajeroUsuarioId, fechaPago, Number(cr.venta_id)]
     );
+
+    const { detalleTextoCobroCredito, insertCajaMovimientoInTransaction } = await import(
+      "@/lib/data/caja-movimientos"
+    );
+    await insertCajaMovimientoInTransaction(conn, {
+      sucursalId: input.sucursalId,
+      usuarioId: input.cajeroUsuarioId,
+      tipo: "ingreso",
+      detalle: detalleTextoCobroCredito({
+        clienteNombre: String(cr.cliente_nombre ?? ""),
+        ventaId: Number(cr.venta_id),
+        tipoPago: input.tipoPago,
+      }),
+      montoBs: monto,
+      fecha: fechaPago,
+    });
 
     const clienteId = Number(cr.cliente_id);
     const hoy = fechaPago.slice(0, 10);

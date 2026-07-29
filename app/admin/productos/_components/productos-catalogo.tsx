@@ -48,23 +48,23 @@ export function ProductosCatalogo({
   sucursales: SucursalRow[];
   total: number;
   rows: ProductoCatalogoRowConStock[];
-  variant?: "admin" | "cajero";
+  variant?: "admin" | "vendedor";
 }) {
-  const basePath = variant === "cajero" ? "/cajero/productos" : "/admin/productos";
+  const basePath = variant === "vendedor" ? "/vendedor/productos" : "/admin/productos";
   const accentBtn =
-    variant === "cajero"
-      ? "rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-500"
+    variant === "vendedor"
+      ? "rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-500"
       : "rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-500";
   const accentChipActive =
-    variant === "cajero"
-      ? "border-emerald-500/60 bg-emerald-600/30 text-emerald-100"
+    variant === "vendedor"
+      ? "border-amber-500/60 bg-amber-600/30 text-amber-100"
       : "border-sky-500/60 bg-sky-600/30 text-sky-100";
   const accentChipIdle =
-    variant === "cajero"
-      ? "border-white/10 bg-slate-950/60 text-slate-300 hover:border-emerald-500/30"
+    variant === "vendedor"
+      ? "border-white/10 bg-slate-950/60 text-slate-300 hover:border-amber-500/30"
       : "border-white/10 bg-slate-950/60 text-slate-300 hover:border-sky-500/30";
   const focusInput =
-    variant === "cajero" ? "focus:border-emerald-500/40" : "focus:border-sky-500/40";
+    variant === "vendedor" ? "focus:border-amber-500/40" : "focus:border-sky-500/40";
 
   return (
     <div className="space-y-4">
@@ -222,7 +222,7 @@ export function ProductosCatalogo({
         sucursales={sucursales}
         variant={variant}
         mostrarPrecioCompra={variant === "admin"}
-        modoAccion={variant === "cajero" ? "solo-lectura" : "editar"}
+        modoAccion={variant === "vendedor" ? "solo-lectura" : "editar"}
       />
     </div>
   );

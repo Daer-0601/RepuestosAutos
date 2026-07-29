@@ -97,7 +97,7 @@ export function buildReporteArqueoResumenHtml(input: ArqueoResumenPrintInput): s
     </div>
     <div style="width:80px"></div>
   </header>
-  <p class="nota">Solo ventas ya cobradas en caja. Crédito Bs: créditos saldados (pendientes no suman).</p>
+  <p class="nota">Solo ventas ya cobradas en caja. Los créditos pendientes de cobro se imprimen en el módulo Créditos.</p>
   <table class="items">
     <colgroup>
       <col style="width:18%" />

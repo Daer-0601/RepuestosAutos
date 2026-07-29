@@ -9,11 +9,11 @@ const COL_MIN = 40;
 /** Columnas fijas antes de sucursales: Img/QR … Precio Tope */
 const FIXED_COLS = 9;
 
-/** Anchos iniciales: 9 fijas + N sucursales + Total + Acción */
-function defaultColWidths(numSucursales: number): number[] {
+/** Anchos iniciales: 9 fijas + N sucursales + Total [+ Acción] */
+function defaultColWidths(numSucursales: number, conAccion: boolean): number[] {
   const base = [88, 88, 72, 220, 80, 80, 88, 88, 72];
   const porSuc = 88;
-  const tail = [64, 104];
+  const tail = conAccion ? [64, 104] : [64];
   return [...base, ...Array(Math.max(0, numSucursales)).fill(porSuc), ...tail];
 }
 
@@ -53,20 +53,21 @@ export function VentaCatalogoTabla({
   loading: boolean;
   /** true = todavía no se pulsó «Buscar» */
   sinConsulta: boolean;
-  onAgregar: (row: VentaCatalogoApiRow) => void;
+  onAgregar?: (row: VentaCatalogoApiRow) => void;
   permitirSinStock?: boolean;
 }) {
+  const mostrarAccion = onAgregar != null;
   const nSuc = sucursales.length;
-  const nCols = FIXED_COLS + nSuc + 2;
+  const nCols = FIXED_COLS + nSuc + 1 + (mostrarAccion ? 1 : 0);
   const sucStart = FIXED_COLS;
   const totalCol = FIXED_COLS + nSuc;
-  const accionCol = FIXED_COLS + nSuc + 1;
+  const accionCol = mostrarAccion ? totalCol + 1 : -1;
 
-  const [colWidths, setColWidths] = useState<number[]>(() => defaultColWidths(nSuc));
+  const [colWidths, setColWidths] = useState<number[]>(() => defaultColWidths(nSuc, mostrarAccion));
 
   useEffect(() => {
-    setColWidths((prev) => (prev.length === nCols ? prev : defaultColWidths(nSuc)));
-  }, [nCols, nSuc]);
+    setColWidths((prev) => (prev.length === nCols ? prev : defaultColWidths(nSuc, mostrarAccion)));
+  }, [nCols, nSuc, mostrarAccion]);
 
   const resizeDragRef = useRef<{ index: number; startX: number; startWidth: number } | null>(null);
   const columnResizeMoveRef = useRef<(e: MouseEvent) => void>(() => {});
@@ -158,10 +159,10 @@ export function VentaCatalogoTabla({
         return s ? s.nombre.slice(0, 24) : `Sucursal ${i - sucStart + 1}`;
       }
       if (i === totalCol) return "Total";
-      if (i === accionCol) return "Acción";
+      if (mostrarAccion && i === accionCol) return "Acción";
       return `col-${i}`;
     },
-    [accionCol, nSuc, sucStart, sucursales, totalCol]
+    [accionCol, mostrarAccion, nSuc, sucStart, sucursales, totalCol]
   );
 
   return (
@@ -238,10 +239,12 @@ export function VentaCatalogoTabla({
               Total
               {resizeHandle(totalCol, "Total")}
             </th>
-            <th className={`${cellPad} relative select-none text-right`}>
-              Acción
-              {resizeHandle(accionCol, "Acción")}
-            </th>
+            {mostrarAccion ? (
+              <th className={`${cellPad} relative select-none text-right`}>
+                Acción
+                {resizeHandle(accionCol, "Acción")}
+              </th>
+            ) : null}
           </tr>
         </thead>
         <tbody className="divide-y divide-amber-500/20">
@@ -351,25 +354,27 @@ export function VentaCatalogoTabla({
                     {r.stock_total}
                     {resizeHandle(totalCol, labelAt(totalCol))}
                   </td>
-                  <td className={`${cellPad} relative text-right`}>
-                    <button
-                      type="button"
-                      disabled={!puede}
-                      title={
-                        permitirSinStock
-                          ? "Agregar a la cotización (el stock no limita el presupuesto)"
-                          : puede
-                            ? "Agregar al carrito (stock en tu sucursal)"
-                            : "Sin stock en tu sucursal; pedí traspaso o venda desde la sucursal que tenga."
-                      }
-                      onClick={() => onAgregar(r)}
-                      className="inline-flex items-center gap-1 rounded-lg border border-amber-500/35 bg-amber-500/15 px-2.5 py-1 text-[11px] font-medium text-amber-100 transition hover:bg-amber-500/25 disabled:cursor-not-allowed disabled:opacity-35"
-                    >
-                      <ShoppingCart className="h-3.5 w-3.5" strokeWidth={2} />
-                      Agregar
-                    </button>
-                    {resizeHandle(accionCol, labelAt(accionCol))}
-                  </td>
+                  {mostrarAccion && onAgregar ? (
+                    <td className={`${cellPad} relative text-right`}>
+                      <button
+                        type="button"
+                        disabled={!puede}
+                        title={
+                          permitirSinStock
+                            ? "Agregar a la cotización (el stock no limita el presupuesto)"
+                            : puede
+                              ? "Agregar al carrito (stock en tu sucursal)"
+                              : "Sin stock en tu sucursal; pedí traspaso o venda desde la sucursal que tenga."
+                        }
+                        onClick={() => onAgregar(r)}
+                        className="inline-flex items-center gap-1 rounded-lg border border-amber-500/35 bg-amber-500/15 px-2.5 py-1 text-[11px] font-medium text-amber-100 transition hover:bg-amber-500/25 disabled:cursor-not-allowed disabled:opacity-35"
+                      >
+                        <ShoppingCart className="h-3.5 w-3.5" strokeWidth={2} />
+                        Agregar
+                      </button>
+                      {resizeHandle(accionCol, labelAt(accionCol))}
+                    </td>
+                  ) : null}
                 </tr>
               );
             })

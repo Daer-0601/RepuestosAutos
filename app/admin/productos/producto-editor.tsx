@@ -1,7 +1,9 @@
 import { ProductoImagenesUrlsField } from "@/app/admin/productos/_components/producto-imagenes-urls-field";
+import { ProductoPreciosUtilidadFields } from "@/app/admin/productos/_components/producto-precios-utilidad-fields";
 import { ProductoCreateDraftPersist } from "@/app/admin/productos/_components/producto-create-draft-persist";
 import { createProductoAction, updateProductoAction } from "@/app/admin/productos/actions";
-import { getProducto, listProductoImagenes } from "@/lib/data/productos";
+import { getProducto, getProductoUltimaCompraPrecio, listProductoImagenes } from "@/lib/data/productos";
+import { getUltimoTipoCambio } from "@/lib/data/tipo-cambio";
 import { notFound } from "next/navigation";
 
 const field =
@@ -19,6 +21,8 @@ export async function ProductoEditor({
     notFound();
   }
   const imagenes = mode === "edit" && id ? await listProductoImagenes(id) : [];
+  const ultimaCompra = mode === "edit" && id ? await getProductoUltimaCompraPrecio(id) : null;
+  const tipoCambio = mode === "edit" ? await getUltimoTipoCambio() : null;
   const action = mode === "create" ? createProductoAction : updateProductoAction;
   const createFormId = "nuevo-producto-form";
 
@@ -171,69 +175,17 @@ export async function ProductoEditor({
             className={field}
           />
         </div>
-        {mode === "edit" ? (
-          <>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div>
-                <label
-                  htmlFor="precio_venta_lista_bs"
-                  className="text-xs font-medium uppercase tracking-wider text-slate-500"
-                >
-                  Precio lista Bs
-                </label>
-                <input
-                  id="precio_venta_lista_bs"
-                  name="precio_venta_lista_bs"
-                  defaultValue={product?.precio_venta_lista_bs ?? ""}
-                  className={field}
-                />
-              </div>
-              <div>
-                <label
-                  htmlFor="precio_venta_lista_usd"
-                  className="text-xs font-medium uppercase tracking-wider text-slate-500"
-                >
-                  Precio lista USD
-                </label>
-                <input
-                  id="precio_venta_lista_usd"
-                  name="precio_venta_lista_usd"
-                  defaultValue={product?.precio_venta_lista_usd ?? ""}
-                  className={field}
-                />
-              </div>
-            </div>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div>
-                <label
-                  htmlFor="porcentaje_utilidad"
-                  className="text-xs font-medium uppercase tracking-wider text-slate-500"
-                >
-                  % utilidad
-                </label>
-                <input
-                  id="porcentaje_utilidad"
-                  name="porcentaje_utilidad"
-                  defaultValue={product?.porcentaje_utilidad ?? ""}
-                  className={field}
-                />
-              </div>
-              <div>
-                <label
-                  htmlFor="punto_tope"
-                  className="text-xs font-medium uppercase tracking-wider text-slate-500"
-                >
-                  Punto tope
-                </label>
-                <input
-                  id="punto_tope"
-                  name="punto_tope"
-                  defaultValue={product?.punto_tope ?? ""}
-                  className={field}
-                />
-              </div>
-            </div>
-          </>
+        {mode === "edit" && product ? (
+          <ProductoPreciosUtilidadFields
+            fieldClass={field}
+            initialPrecioVentaBs={product.precio_venta_lista_bs ?? ""}
+            initialPrecioVentaUsd={product.precio_venta_lista_usd ?? ""}
+            initialPorcentajeUtilidad={product.porcentaje_utilidad ?? ""}
+            initialPuntoTope={product.punto_tope ?? ""}
+            precioCompraBs={ultimaCompra?.precio_compra_unitario_bs ?? null}
+            precioCompraUsd={ultimaCompra?.precio_compra_unitario_usd ?? null}
+            tipoCambio={tipoCambio?.valor_bs_por_usd ?? null}
+          />
         ) : null}
         <div>
           <label htmlFor="estado" className="text-xs font-medium uppercase tracking-wider text-slate-500">

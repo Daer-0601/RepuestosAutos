@@ -4,7 +4,7 @@ import { VentaDetalleProductosTabla } from "@/app/vendedor/_components/venta-det
 import { formatDateTimeMysqlBolivia, formatoMostrarFechaHoraBo } from "@/lib/fecha-bolivia";
 import type { VentaDetalleProductoRow } from "@/lib/data/ventas-vendedor";
 import { openNotaEntregaPrint } from "@/lib/reportes/nota-entrega-html";
-import { CheckCircle2, Loader2, RefreshCw, X } from "lucide-react";
+import { CheckCircle2, Loader2, Printer, RefreshCw, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 type VentaPendiente = {
@@ -180,8 +180,41 @@ export function CobrosVendedorPanel({
   const [entregando, setEntregando] = useState(false);
   const [observacionCredito, setObservacionCredito] = useState("");
   const [msg, setMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
+  const [ultimaNotaVentaId, setUltimaNotaVentaId] = useState<number | null>(null);
+  const [reimprimiendo, setReimprimiendo] = useState(false);
 
   const esCreditoPendiente = detalle?.tipoPago === "credito";
+
+  async function reimprimirNotaEntrega(ventaId: number) {
+    setReimprimiendo(true);
+    setMsg(null);
+    try {
+      const res = await fetch(`/api/cajero/creditos/nota-entrega?ventaId=${ventaId}`, {
+        cache: "no-store",
+      });
+      const data = (await res.json()) as {
+        nota?: Parameters<typeof openNotaEntregaPrint>[0];
+        error?: string;
+      };
+      if (!res.ok || !data.nota) {
+        setMsg({ type: "err", text: data.error ?? "No se pudo reimprimir la nota." });
+        return;
+      }
+      const pr = openNotaEntregaPrint(data.nota);
+      if (!pr.ok) {
+        setMsg({ type: "err", text: pr.message });
+        return;
+      }
+      setMsg({
+        type: "ok",
+        text: `Reimprimiendo Nota de entrega de la venta #${ventaId}.`,
+      });
+    } catch {
+      setMsg({ type: "err", text: "Error de red al reimprimir." });
+    } finally {
+      setReimprimiendo(false);
+    }
+  }
 
   const cargarLista = useCallback(async (opts?: { silent?: boolean }) => {
     const silent = opts?.silent === true;
@@ -293,9 +326,10 @@ export function CobrosVendedorPanel({
         const pr = openNotaEntregaPrint(data.nota);
         if (!pr.ok) setMsg({ type: "err", text: pr.message });
       }
+      setUltimaNotaVentaId(detalle.id);
       setMsg({
         type: "ok",
-        text: `Venta #${detalle.id} entregada a crédito. Pago único en caja dentro de 1 mes. Imprimí la Nota de entrega.`,
+        text: `Venta #${detalle.id} entregada a crédito. Pago único en caja dentro de 1 mes.`,
       });
       setDetalleId(null);
       setDetalle(null);
@@ -392,7 +426,7 @@ export function CobrosVendedorPanel({
       </div>
 
       {msg ? (
-        <p
+        <div
           className={`rounded-xl border px-4 py-3 text-sm ${
             msg.type === "ok"
               ? "border-emerald-500/35 bg-emerald-950/30 text-emerald-100"
@@ -400,8 +434,23 @@ export function CobrosVendedorPanel({
           }`}
           role="status"
         >
-          {msg.text}
-        </p>
+          <p>{msg.text}</p>
+          {msg.type === "ok" && ultimaNotaVentaId != null ? (
+            <button
+              type="button"
+              disabled={reimprimiendo}
+              onClick={() => void reimprimirNotaEntrega(ultimaNotaVentaId)}
+              className="mt-3 inline-flex items-center gap-2 rounded-lg border border-emerald-400/40 bg-emerald-500/15 px-3 py-2 text-xs font-semibold text-emerald-50 hover:bg-emerald-500/25 disabled:opacity-50"
+            >
+              {reimprimiendo ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Printer className="h-3.5 w-3.5" />
+              )}
+              Reimprimir nota de entrega #{ultimaNotaVentaId}
+            </button>
+          ) : null}
+        </div>
       ) : null}
 
       {error ? (

@@ -10,17 +10,50 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 const COL_MIN = 40;
 const cellPad = "px-2 py-1.5";
 
-function cellBorderR(variant: "admin" | "cajero") {
-  return variant === "cajero" ? "border-r border-emerald-500/35" : "border-r border-sky-500/35";
+function catalogoTablaTheme(variant: "admin" | "vendedor") {
+  if (variant === "vendedor") {
+    return {
+      borderR: "border-r border-amber-500/35",
+      resizeHandleHover: "hover:bg-amber-500/30 active:bg-amber-500/40",
+      tableBorder: "border-amber-500/30",
+      theadBorder: "border-amber-500/45",
+      tbodyDivide: "divide-amber-500/30",
+      rowRing: "ring-amber-400",
+      rowSelectedBg: "bg-amber-950/55 shadow-[inset_0_0_0_9999px_rgba(245,158,11,0.12)]",
+      sucRefBg: "bg-amber-500/15 text-amber-100",
+      sucRefCellBg: "bg-amber-500/10",
+      linkClass: "font-medium text-amber-300 hover:text-amber-200 hover:underline",
+    };
+  }
+  return {
+    borderR: "border-r border-sky-500/35",
+    resizeHandleHover: "hover:bg-sky-500/30 active:bg-sky-500/40",
+    tableBorder: "border-sky-500/30",
+    theadBorder: "border-sky-500/45",
+    tbodyDivide: "divide-sky-500/30",
+    rowRing: "ring-sky-400",
+    rowSelectedBg: "bg-sky-950/55 shadow-[inset_0_0_0_9999px_rgba(56,189,248,0.12)]",
+    sucRefBg: "bg-sky-500/15 text-sky-100",
+    sucRefCellBg: "bg-sky-500/10",
+    linkClass: "font-medium text-sky-300 hover:text-sky-200 hover:underline",
+  };
 }
 
 function defaultColWidths(
   sucCount: number,
-  opts: { mostrarPrecioCompra: boolean; mostrarAccion: boolean }
+  opts: {
+    mostrarPrecioCompra: boolean;
+    mostrarPrecioVentaUsd: boolean;
+    mostrarProveedor: boolean;
+    mostrarAccion: boolean;
+  }
 ): number[] {
-  const baseCore = [88, 72, 112, 88, 120, 220, 72, 72, 72, 88, 56, 72];
+  const baseCore = [88, 72, 112, 88, 120, 220, 72, 72];
+  if (opts.mostrarProveedor) baseCore.push(72);
+  baseCore.push(88, 56, 72);
   if (opts.mostrarPrecioCompra) baseCore.push(88);
-  baseCore.push(88, 88);
+  if (opts.mostrarPrecioVentaUsd) baseCore.push(88);
+  baseCore.push(88);
   const suc = Array.from({ length: sucCount }, () => 128);
   const tail = [56, 80];
   if (opts.mostrarAccion) tail.push(72);
@@ -49,9 +82,9 @@ export function ProductosCatalogoTabla({
   sucursales: SucursalRow[];
   /** En traspasos u otros pickers: botón agregar en lugar de enlace Editar. */
   modoAccion?: "editar" | "agregar" | "solo-lectura";
-  /** Oculta columna de precio de compra (p. ej. catálogo cajero). */
+  /** Oculta columna de precio de compra (p. ej. catálogo vendedor). */
   mostrarPrecioCompra?: boolean;
-  variant?: "admin" | "cajero";
+  variant?: "admin" | "vendedor";
   /** Resalta la columna de stock de esta sucursal (p. ej. origen del traspaso). */
   sucursalReferenciaId?: number | null;
   onAgregar?: (row: ProductoCatalogoRowConStock) => void;
@@ -59,48 +92,53 @@ export function ProductosCatalogoTabla({
   idsEnCarrito?: ReadonlySet<number>;
 }) {
   const mostrarAccion = modoAccion !== "solo-lectura";
-  const borderR = cellBorderR(variant);
-  const resizeHandleHover =
-    variant === "cajero"
-      ? "hover:bg-emerald-500/30 active:bg-emerald-500/40"
-      : "hover:bg-sky-500/30 active:bg-sky-500/40";
-  const tableBorder =
-    variant === "cajero" ? "border-emerald-500/30" : "border-sky-500/30";
-  const theadBorder =
-    variant === "cajero" ? "border-emerald-500/45" : "border-sky-500/45";
-  const tbodyDivide =
-    variant === "cajero" ? "divide-emerald-500/30" : "divide-sky-500/30";
-  const rowRing =
-    variant === "cajero" ? "ring-emerald-400" : "ring-sky-400";
-  const rowSelectedBg =
-    variant === "cajero"
-      ? "bg-emerald-950/55 shadow-[inset_0_0_0_9999px_rgba(16,185,129,0.12)]"
-      : "bg-sky-950/55 shadow-[inset_0_0_0_9999px_rgba(56,189,248,0.12)]";
-  const sucRefBg = variant === "cajero" ? "bg-emerald-500/15 text-emerald-100" : "bg-sky-500/15 text-sky-100";
-  const sucRefCellBg = variant === "cajero" ? "bg-emerald-500/10" : "bg-sky-500/10";
-  const linkClass =
-    variant === "cajero"
-      ? "font-medium text-emerald-300 hover:text-emerald-200 hover:underline"
-      : "font-medium text-sky-300 hover:text-sky-200 hover:underline";
+  const mostrarProveedor = variant !== "vendedor";
+  const mostrarPrecioVentaUsd = variant !== "vendedor";
+  const {
+    borderR,
+    resizeHandleHover,
+    tableBorder,
+    theadBorder,
+    tbodyDivide,
+    rowRing,
+    rowSelectedBg,
+    sucRefBg,
+    sucRefCellBg,
+    linkClass,
+  } = catalogoTablaTheme(variant);
   const [colWidths, setColWidths] = useState<number[]>(() =>
-    defaultColWidths(sucursales.length, { mostrarPrecioCompra, mostrarAccion })
+    defaultColWidths(sucursales.length, {
+      mostrarPrecioCompra,
+      mostrarPrecioVentaUsd,
+      mostrarProveedor,
+      mostrarAccion,
+    })
   );
   const resizeDragRef = useRef<{ index: number; startX: number; startWidth: number } | null>(null);
   /** Fila marcada al hacer clic (mismo clic desmarca). */
   const [marcadoId, setMarcadoId] = useState<number | null>(null);
 
   useEffect(() => {
+    const coreColCount = 10 + (mostrarProveedor ? 1 : 0);
     const need =
-      14 +
+      coreColCount +
       (mostrarPrecioCompra ? 1 : 0) +
-      (mostrarAccion ? 1 : 0) +
-      sucursales.length;
+      (mostrarPrecioVentaUsd ? 1 : 0) +
+      1 +
+      sucursales.length +
+      2 +
+      (mostrarAccion ? 1 : 0);
     setColWidths((prev) =>
       prev.length === need
         ? prev
-        : defaultColWidths(sucursales.length, { mostrarPrecioCompra, mostrarAccion })
+        : defaultColWidths(sucursales.length, {
+            mostrarPrecioCompra,
+            mostrarPrecioVentaUsd,
+            mostrarProveedor,
+            mostrarAccion,
+          })
     );
-  }, [sucursales.length, mostrarPrecioCompra, mostrarAccion]);
+  }, [sucursales.length, mostrarPrecioCompra, mostrarPrecioVentaUsd, mostrarProveedor, mostrarAccion]);
 
   useEffect(() => {
     setMarcadoId((id) => {
@@ -121,17 +159,40 @@ export function ProductosCatalogoTabla({
       "Descripción",
       "Repuesto",
       "Proced.",
-      "Proveedor",
-      "Marca",
-      "Unidad",
     ];
-    if (mostrarPrecioCompra) base.push("P. compra");
-    base.push("P. venta USD", "P. venta Bs");
+    if (mostrarProveedor) base.push("Proveedor");
+    base.push("Marca", "Unidad");
+    if (mostrarPrecioCompra) base.push("P. compra USD");
+    if (mostrarPrecioVentaUsd) base.push("P. venta USD");
+    base.push("P. venta Bs");
     const suc = sucursales.map((s) => s.nombre);
     const tail = ["Stock", "P. tope"];
     if (mostrarAccion) tail.push("Acción");
     return [...base, ...suc, ...tail];
-  }, [sucursales, mostrarPrecioCompra, mostrarAccion]);
+  }, [sucursales, mostrarPrecioCompra, mostrarPrecioVentaUsd, mostrarProveedor, mostrarAccion]);
+
+  const columnIndices = useMemo(() => {
+    const coreColCount = 10 + (mostrarProveedor ? 1 : 0);
+    let next = coreColCount;
+    const idxPrecioCompra = mostrarPrecioCompra ? next++ : -1;
+    const idxPrecioVentaUsd = mostrarPrecioVentaUsd ? next++ : -1;
+    const idxPrecioVentaBs = next++;
+    const idxSucStart = idxPrecioVentaBs + 1;
+    const idxStockTotal = idxSucStart + sucursales.length;
+    const idxPtope = idxStockTotal + 1;
+    const idxAccion = mostrarAccion ? idxPtope + 1 : -1;
+    return { idxPrecioCompra, idxPrecioVentaUsd, idxPrecioVentaBs, idxSucStart, idxStockTotal, idxPtope, idxAccion };
+  }, [mostrarPrecioCompra, mostrarPrecioVentaUsd, mostrarProveedor, mostrarAccion, sucursales.length]);
+
+  const {
+    idxPrecioCompra,
+    idxPrecioVentaUsd,
+    idxPrecioVentaBs,
+    idxSucStart,
+    idxStockTotal,
+    idxPtope,
+    idxAccion,
+  } = columnIndices;
 
   const onColumnResizeMove = useCallback((e: MouseEvent) => {
     const d = resizeDragRef.current;
@@ -189,14 +250,6 @@ export function ProductosCatalogoTabla({
 
   const nSuc = sucursales.length;
   const colSpan = labels.length;
-  const idxPrecioVentaUsd = 11 + (mostrarPrecioCompra ? 1 : 0);
-  const idxPrecioVentaBs = idxPrecioVentaUsd + 1;
-  /** Primera columna de stock por sucursal (después de P. venta Bs). */
-  const idxSucStart = idxPrecioVentaBs + 1;
-  /** Stock total general, después de todas las sucursales. */
-  const idxStockTotal = idxSucStart + nSuc;
-  const idxPtope = idxStockTotal + 1;
-  const idxAccion = mostrarAccion ? idxPtope + 1 : -1;
 
   return (
     <div className="max-h-[min(75dvh,720px)] overflow-y-auto overflow-x-auto rounded-2xl border border-white/10 bg-slate-900/40 overscroll-contain">
@@ -318,37 +371,47 @@ export function ProductosCatalogoTabla({
                     {r.procedencia ?? "—"}
                     {resizeHandle(7, labels[7])}
                   </td>
-                  <td className={`${cellPad} ${borderR} relative truncate opacity-80`}>
-                    {r.proveedor_nombre ?? "—"}
-                    {resizeHandle(8, labels[8])}
-                  </td>
+                  {mostrarProveedor ? (
+                    <td className={`${cellPad} ${borderR} relative truncate opacity-80`}>
+                      {r.proveedor_nombre ?? "—"}
+                      {resizeHandle(8, labels[8])}
+                    </td>
+                  ) : null}
                   <td className={`${cellPad} ${borderR} relative truncate`}>
                     {r.marca_auto ?? "—"}
-                    {resizeHandle(9, labels[9])}
+                    {resizeHandle(mostrarProveedor ? 9 : 8, labels[mostrarProveedor ? 9 : 8])}
                   </td>
                   <td className={`${cellPad} ${borderR} relative truncate`}>
                     {r.unidad ?? "—"}
-                    {resizeHandle(10, labels[10])}
+                    {resizeHandle(mostrarProveedor ? 10 : 9, labels[mostrarProveedor ? 10 : 9])}
                   </td>
                   {mostrarPrecioCompra ? (
                     <td
                       className={`${cellPad} ${borderR} relative truncate font-mono ${tone.mono}`}
                       title={
                         r.precio_compra_unitario_usd
-                          ? `Última compra · USD unit.: ${r.precio_compra_unitario_usd}`
-                          : r.precio_compra_unitario_bs
-                            ? "Última compra confirmada (unitario Bs)"
-                            : undefined
+                          ? r.precio_compra_unitario_bs
+                            ? `Última compra · USD: ${r.precio_compra_unitario_usd} · Bs: ${r.precio_compra_unitario_bs}`
+                            : `Última compra · USD unit.: ${r.precio_compra_unitario_usd}`
+                          : undefined
                       }
                     >
-                      {r.precio_compra_unitario_bs ?? "—"}
-                      {resizeHandle(idxPrecioVentaUsd - 1, labels[idxPrecioVentaUsd - 1] ?? "P. compra")}
+                      {r.precio_compra_unitario_usd ?? "—"}
+                      {resizeHandle(
+                        idxPrecioCompra,
+                        labels[idxPrecioCompra] ?? "P. compra USD"
+                      )}
                     </td>
                   ) : null}
-                  <td className={`${cellPad} ${borderR} relative truncate font-mono ${tone.mono}`}>
-                    {r.precio_venta_lista_usd ?? "—"}
-                    {resizeHandle(idxPrecioVentaUsd, labels[idxPrecioVentaUsd] ?? "P. venta USD")}
-                  </td>
+                  {mostrarPrecioVentaUsd ? (
+                    <td className={`${cellPad} ${borderR} relative truncate font-mono ${tone.mono}`}>
+                      {r.precio_venta_lista_usd ?? "—"}
+                      {resizeHandle(
+                        idxPrecioVentaUsd,
+                        labels[idxPrecioVentaUsd] ?? "P. venta USD"
+                      )}
+                    </td>
+                  ) : null}
                   <td className={`${cellPad} ${borderR} relative truncate font-mono ${tone.mono}`}>
                     {r.precio_venta_lista_bs ?? "—"}
                     {resizeHandle(idxPrecioVentaBs, labels[idxPrecioVentaBs] ?? "P. venta Bs")}

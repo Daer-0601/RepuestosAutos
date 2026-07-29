@@ -29,6 +29,7 @@ export type LineaIngresoInput = {
   codigoPiezaLinea: string;
   medida: string;
   descripcion: string;
+  repuesto: string;
   imagenesUrls: string[];
   /** Si true, se aplica la lista de URLs (vacía borra la galería). */
   reemplazarImagenes: boolean;
@@ -41,25 +42,18 @@ export type IngresoCompraInput = {
   tipoPago: TipoPagoCompra;
   tipoCambioId: number;
   tipoCambioSnapshot: number;
+  /** % flete sobre precio compra unitario (USD): costo final = compra × (1 + %/100). */
+  pctFlete: number;
   numeroDocumento: string | null;
   observaciones: string | null;
-  /** 0–100; se ignora si hay monto flete manual. */
-  pctFlete: number;
-  /** Si no null, es el total de flete en Bs (sustituye el %). */
+  /** @deprecated Usar pctFlete por unidad; se ignora si pctFlete > 0 o siempre. */
   fleteTotalBsManual: number | null;
   lineas: LineaIngresoInput[];
 };
 
-function round2(n: number): number {
-  return Math.round(n * 100) / 100;
-}
+import { costoConFleteUsd, round2, round4 } from "@/lib/precio-utilidad";
 
-function round4(n: number): number {
-  return Math.round(n * 1e4) / 1e4;
-}
-
-function strNum(s: string | null): number | null {
-  if (s == null || s === "") return null;
+function strNum(s: string | null | undefined): number | null {
   const n = Number(s);
   return Number.isFinite(n) ? n : null;
 }
@@ -82,7 +76,7 @@ function buildProductoPatch(
     codigo_pieza: line.codigoPiezaLinea.trim() || p.codigo_pieza,
     nombre: p.nombre,
     especificacion: p.especificacion,
-    repuesto: p.repuesto,
+    repuesto: line.repuesto.trim() || p.repuesto,
     procedencia: p.procedencia,
     medida: line.medida.trim() || null,
     descripcion: line.descripcion.trim() || null,
@@ -134,6 +128,9 @@ export async function registrarIngresoCompra(input: IngresoCompraInput): Promise
   const calculadas: LineaCalculada[] = [];
   let sumSubBs = 0;
   let sumSubUsd = 0;
+  let sumFleteBs = 0;
+
+  const pctFlete = Math.max(0, Number(input.pctFlete) || 0);
 
   for (const line of input.lineas) {
     if (!Number.isFinite(line.productoId) || line.productoId < 1) {
@@ -147,59 +144,40 @@ export async function registrarIngresoCompra(input: IngresoCompraInput): Promise
     if (!Number.isFinite(pUnitBs) || pUnitBs < 0) {
       return { ok: false, message: "Precio de compra inválido." };
     }
-    const pUnitUsd =
+    const baseUsd =
       line.precioCompraUnitUsd !== null && Number.isFinite(line.precioCompraUnitUsd)
         ? round4(line.precioCompraUnitUsd)
         : round4(pUnitBs / tc);
+    const baseBs = round2(baseUsd * tc);
+    const landedUsd = costoConFleteUsd(baseUsd, pctFlete);
+    const landedBs = round2(landedUsd * tc);
 
-    const subBs = round2(cant * pUnitBs);
-    const subUsd = round4(cant * pUnitUsd);
-    sumSubBs += subBs;
-    sumSubUsd += subUsd;
+    const subUsd = round4(cant * baseUsd);
+    const subBs = round2(subUsd * tc);
+    const montoFleteUsd = round4(cant * baseUsd * (pctFlete / 100));
+    const montoFleteBs = round2(montoFleteUsd * tc);
+    const totalUsd = round4(cant * landedUsd);
+    const totalBs = round2(totalUsd * tc);
+
+    sumSubBs = round2(sumSubBs + subBs);
+    sumSubUsd = round4(sumSubUsd + subUsd);
+    sumFleteBs = round2(sumFleteBs + montoFleteBs);
+
     calculadas.push({
       line,
-      precioUnitUsd: pUnitUsd,
+      precioUnitUsd: baseUsd,
       subtotalBs: subBs,
       subtotalUsd: subUsd,
-      montoFleteBs: 0,
-      totalBs: 0,
-      totalUsd: 0,
+      montoFleteBs,
+      totalBs,
+      totalUsd,
       patch: null,
     });
   }
 
   sumSubBs = round2(sumSubBs);
   sumSubUsd = round4(sumSubUsd);
-
-  let fleteTotal = 0;
-  if (input.fleteTotalBsManual !== null && Number.isFinite(input.fleteTotalBsManual)) {
-    fleteTotal = round2(Math.max(0, input.fleteTotalBsManual));
-  } else {
-    const pct = Math.min(100, Math.max(0, input.pctFlete));
-    fleteTotal = round2((sumSubBs * pct) / 100);
-  }
-
-  if (sumSubBs <= 0) {
-    for (const c of calculadas) {
-      c.montoFleteBs = 0;
-      c.totalBs = c.subtotalBs;
-      c.totalUsd = c.subtotalUsd;
-    }
-  } else {
-    let allocated = 0;
-    calculadas.forEach((c, idx) => {
-      if (idx === calculadas.length - 1) {
-        c.montoFleteBs = round2(fleteTotal - allocated);
-      } else {
-        const share = round2((fleteTotal * c.subtotalBs) / sumSubBs);
-        c.montoFleteBs = share;
-        allocated = round2(allocated + share);
-      }
-      c.totalBs = round2(c.subtotalBs + c.montoFleteBs);
-      c.totalUsd = round4(c.subtotalUsd + c.montoFleteBs / tc);
-    });
-  }
-
+  const fleteTotal = round2(sumFleteBs);
   const totalBs = round2(calculadas.reduce((s, c) => s + c.totalBs, 0));
   const totalUsd = round4(calculadas.reduce((s, c) => s + c.totalUsd, 0));
 

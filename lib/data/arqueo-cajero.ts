@@ -248,7 +248,12 @@ export async function listSalidasDiariasArqueoPorVendedor(
     )
   );
 
-  return (rows as RowDataPacket[]).map(mapSalidasDiariasRow);
+  return (rows as RowDataPacket[]).map(mapSalidasDiariasRow).filter(salidaSinCreditoPendiente);
+}
+
+/** Excluye líneas de crédito aún no cobrado (van al reporte de Créditos). */
+function salidaSinCreditoPendiente(ln: SalidasDiariasArqueoLinea): boolean {
+  return !(ln.esCredito && !ln.creditoCobrado);
 }
 
 /**
@@ -287,14 +292,13 @@ export async function listSalidasDiariasArqueoSucursal(
     )
   );
 
-  return (rows as RowDataPacket[]).map(mapSalidasDiariasRow);
+  return (rows as RowDataPacket[]).map(mapSalidasDiariasRow).filter(salidaSinCreditoPendiente);
 }
 
 export function totalesSalidasDiarias(lineas: SalidasDiariasArqueoLinea[]): { totalBs: number; totalUsd: number } {
   let totalBs = 0;
   let totalUsd = 0;
   for (const ln of lineas) {
-    if (ln.esCredito && !ln.creditoCobrado) continue;
     totalBs = Math.round((totalBs + ln.totalLineaBs) * 100) / 100;
     totalUsd = Math.round((totalUsd + ln.totalLineaUsd) * 1e4) / 1e4;
   }

@@ -143,6 +143,7 @@ export function buildReporteSalidasDiariasHtml(input: SalidasDiariasPrintInput):
     </div>
     <div style="width:64px"></div>
   </header>
+  <p class="nota">No incluye ventas a crédito pendientes de cobro (ver reporte en Créditos).</p>
   <table class="items">
     <colgroup>
       <col style="width:7%" />

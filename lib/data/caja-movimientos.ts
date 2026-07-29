@@ -204,6 +204,26 @@ async function insertCajaMovimientoRow(
   return Number(res.insertId);
 }
 
+export function detalleTextoCobroCredito(input: {
+  clienteNombre: string;
+  ventaId: number;
+  tipoPago: "efectivo" | "qr" | "tarjeta";
+}): string {
+  const cliente = input.clienteNombre.trim() || "Cliente";
+  const tp =
+    input.tipoPago === "qr" ? "QR" : input.tipoPago === "tarjeta" ? "Tarjeta" : "Efectivo";
+  return `COBRO CRÉDITO · ${cliente} · ${tp} · Venta #${input.ventaId}`.slice(0, 500);
+}
+
+/** Inserta un movimiento de caja dentro de una transacción ya abierta. */
+export async function insertCajaMovimientoInTransaction(
+  conn: PoolConnection,
+  row: InsertCajaRow
+): Promise<number> {
+  await ensureCajaMovimientosTable();
+  return insertCajaMovimientoRow(conn, row);
+}
+
 export async function registrarCajaMovimiento(
   input: RegistrarCajaMovimientoInput
 ): Promise<{ ok: true; id: number } | { ok: false; message: string }> {

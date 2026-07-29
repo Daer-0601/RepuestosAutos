@@ -7,6 +7,7 @@ import {
   LayoutDashboard,
   LogOut,
   Menu,
+  Package,
   PlusCircle,
   ScrollText,
   Users,
@@ -22,6 +23,7 @@ const nav = [
   { href: "/vendedor/ventas", label: "Historial ventas", icon: ScrollText, exact: true },
   { href: "/vendedor/creditos", label: "Historial créditos", icon: CreditCard, exact: false },
   { href: "/vendedor/clientes", label: "Clientes", icon: Users, exact: false },
+  { href: "/vendedor/productos", label: "Productos", icon: Package, exact: true },
   { href: "/vendedor/cotizaciones", label: "Cotizaciones", icon: FileText, exact: true },
 ] as const;
 

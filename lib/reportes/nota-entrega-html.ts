@@ -1,6 +1,5 @@
 import type { NotaEntregaData } from "@/lib/data/creditos";
 import { montoBolivianosEnLetras } from "@/lib/monto-bolivianos-letras";
-import { openReporteHojaPrint } from "@/lib/reportes/reporte-hoja-impresion";
 
 function escHtml(s: string): string {
   return s
@@ -58,35 +57,74 @@ export function buildNotaEntregaHtml(data: NotaEntregaData): string {
   <title>${titulo}</title>
   <style>
     * { box-sizing: border-box; }
-    body {
-      font-family: "Courier New", Courier, monospace;
-      font-size: 11pt;
-      color: #000;
-      margin: 8mm 10mm;
-      line-height: 1.25;
+    /*
+      Tamaño como el ticket original (compacto).
+      Arial + peso medio-alto: se lee en Elgin sin agrandar el formato.
+    */
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #fff;
     }
-    .top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px; }
-    .marca { font-weight: 700; font-size: 12pt; }
-    .hora { font-size: 10pt; }
-    .titulo { text-align: center; font-weight: 700; font-size: 12pt; margin: 8px 0 4px; text-transform: uppercase; }
-    .fecha { text-align: right; font-size: 10.5pt; margin-bottom: 8px; }
-    .cliente { margin-bottom: 8px; font-size: 11pt; }
-    table.items { width: 100%; border-collapse: collapse; margin-top: 4px; }
-    table.items th, table.items td { border: 1px solid #000; padding: 4px 5px; vertical-align: top; }
-    table.items th { font-size: 9pt; text-transform: uppercase; text-align: center; }
-    table.items td.cod { width: 14%; font-size: 10pt; }
-    table.items td.desc { font-size: 10pt; }
-    table.items td.num { text-align: right; white-space: nowrap; font-size: 10pt; width: 12%; }
-    .total { margin-top: 10px; font-weight: 700; font-size: 12pt; }
-    .son { margin-top: 6px; font-size: 10.5pt; }
-    .obs { margin-top: 8px; font-size: 10.5pt; }
-    .firmas { display: flex; justify-content: space-between; margin-top: 28px; gap: 16px; font-size: 10pt; }
+    body {
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 10pt;
+      font-weight: 600;
+      color: #000;
+      margin: 0;
+      padding: 0 2mm 2mm;
+      line-height: 1.25;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+    .top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 4px; }
+    .marca { font-weight: 700; font-size: 11pt; }
+    .hora { font-size: 9.5pt; font-weight: 600; }
+    .titulo {
+      text-align: center;
+      font-weight: 700;
+      font-size: 11pt;
+      margin: 4px 0 2px;
+      text-transform: uppercase;
+    }
+    .fecha { text-align: right; font-size: 9.5pt; margin-bottom: 6px; font-weight: 600; }
+    .cliente { margin-bottom: 6px; font-size: 10pt; font-weight: 600; }
+    table.items { width: 100%; border-collapse: collapse; margin-top: 2px; }
+    table.items th, table.items td {
+      border: 1px solid #000;
+      padding: 3px 4px;
+      vertical-align: top;
+      font-weight: 600;
+    }
+    table.items th {
+      font-size: 8pt;
+      text-transform: uppercase;
+      text-align: center;
+      font-weight: 700;
+    }
+    table.items td.cod { width: 14%; font-size: 9pt; }
+    table.items td.desc { font-size: 9pt; word-break: break-word; }
+    table.items td.num { text-align: right; white-space: nowrap; font-size: 9pt; width: 12%; }
+    .total { margin-top: 8px; font-weight: 700; font-size: 11pt; }
+    .son { margin-top: 4px; font-size: 9.5pt; font-weight: 600; }
+    .obs { margin-top: 6px; font-size: 9.5pt; font-weight: 600; }
+    .firmas { display: flex; justify-content: space-between; margin-top: 20px; gap: 12px; font-size: 9pt; font-weight: 600; }
     .firma { flex: 1; text-align: center; }
-    .firma .linea { border-bottom: 1px dotted #000; height: 22px; margin-bottom: 4px; }
-    .pie { margin-top: 16px; font-size: 10pt; }
+    .firma .linea { border-bottom: 1px solid #000; height: 18px; margin-bottom: 3px; }
+    .pie { margin-top: 12px; font-size: 9pt; font-weight: 600; }
+    @page {
+      size: 80mm auto;
+      margin: 0;
+    }
     @media print {
-      @page { size: 80mm auto; margin: 4mm; }
-      body { margin: 0; font-size: 10pt; }
+      html, body {
+        margin: 0 !important;
+        padding: 0 !important;
+      }
+      body {
+        padding: 1mm 2mm 2mm !important;
+        font-size: 10pt;
+      }
     }
   </style>
 </head>
@@ -122,6 +160,71 @@ export function buildNotaEntregaHtml(data: NotaEntregaData): string {
 </html>`;
 }
 
+/** Impresión por iframe oculto (no usa popup; evita el bloqueador del navegador). */
 export function openNotaEntregaPrint(data: NotaEntregaData): { ok: true } | { ok: false; message: string } {
-  return openReporteHojaPrint(buildNotaEntregaHtml(data));
+  if (typeof document === "undefined") {
+    return { ok: false, message: "Impresión no disponible." };
+  }
+
+  const html = buildNotaEntregaHtml(data);
+  const prev = document.getElementById("nota-entrega-print-frame");
+  if (prev) prev.remove();
+
+  const iframe = document.createElement("iframe");
+  iframe.id = "nota-entrega-print-frame";
+  iframe.setAttribute("aria-hidden", "true");
+  iframe.setAttribute("title", "Impresión nota de entrega");
+  // Ancho real ~80 mm: si es 0×0 Chrome escala mal y el ticket sale enorme.
+  iframe.style.cssText = [
+    "position:fixed",
+    "left:0",
+    "top:0",
+    "width:80mm",
+    "height:120mm",
+    "border:0",
+    "opacity:0",
+    "pointer-events:none",
+    "z-index:-1",
+  ].join(";");
+  document.body.appendChild(iframe);
+
+  const win = iframe.contentWindow;
+  const doc = iframe.contentDocument ?? win?.document;
+  if (!win || !doc) {
+    iframe.remove();
+    return { ok: false, message: "No se pudo preparar la impresión." };
+  }
+
+  doc.open();
+  doc.write(html);
+  doc.close();
+
+  const cleanup = () => {
+    globalThis.setTimeout(() => {
+      try {
+        iframe.remove();
+      } catch {
+        /* ignore */
+      }
+    }, 1000);
+  };
+
+  const doPrint = () => {
+    try {
+      win.focus();
+      win.print();
+    } catch {
+      cleanup();
+      return;
+    }
+    win.addEventListener("afterprint", cleanup, { once: true });
+    globalThis.setTimeout(cleanup, 60_000);
+  };
+
+  // Esperar un frame para que el layout del iframe tenga tamaño real.
+  globalThis.requestAnimationFrame(() => {
+    globalThis.setTimeout(doPrint, 250);
+  });
+
+  return { ok: true };
 }

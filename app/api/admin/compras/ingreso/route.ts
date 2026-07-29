@@ -60,6 +60,7 @@ function parseLinea(raw: unknown): LineaIngresoInput | null {
           : "",
     medida: typeof o.medida === "string" ? o.medida : "",
     descripcion: typeof o.descripcion === "string" ? o.descripcion : "",
+    repuesto: typeof o.repuesto === "string" ? o.repuesto : "",
     imagenesUrls: Array.isArray(o.imagenesUrls)
       ? o.imagenesUrls.filter((u): u is string => typeof u === "string" && u.trim().length > 0)
       : [],
@@ -97,8 +98,8 @@ export async function POST(request: Request) {
   if (!isTipoPago(tipoPagoRaw)) {
     return NextResponse.json({ error: "Tipo de pago inválido." }, { status: 400 });
   }
-  if (!Number.isFinite(pctFlete) || pctFlete < 0 || pctFlete > 100) {
-    return NextResponse.json({ error: "% flete debe estar entre 0 y 100." }, { status: 400 });
+  if (!Number.isFinite(pctFlete) || pctFlete < 0) {
+    return NextResponse.json({ error: "% flete no puede ser negativo." }, { status: 400 });
   }
   if (fleteManual !== null && (!Number.isFinite(fleteManual) || fleteManual < 0)) {
     return NextResponse.json({ error: "Monto de flete inválido." }, { status: 400 });
@@ -161,7 +162,7 @@ export async function POST(request: Request) {
     observaciones:
       typeof b.observaciones === "string" && b.observaciones.trim() ? b.observaciones.trim() : null,
     pctFlete,
-    fleteTotalBsManual: fleteManual,
+    fleteTotalBsManual: null,
     lineas,
   });
 

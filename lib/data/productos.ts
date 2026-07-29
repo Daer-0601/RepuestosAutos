@@ -439,6 +439,28 @@ export async function replaceProductoImagenesWithConnection(
   }
 }
 
+export type ProductoUltimaCompraPrecio = {
+  precio_compra_unitario_bs: string | null;
+  precio_compra_unitario_usd: string | null;
+};
+
+/** Precio unitario de la última compra confirmada del producto. */
+export async function getProductoUltimaCompraPrecio(
+  productoId: number
+): Promise<ProductoUltimaCompraPrecio | null> {
+  const [rows] = await pool.execute<RowDataPacket[]>(
+    `SELECT cd.precio_compra_unitario_bs, cd.precio_compra_unitario_usd
+     FROM compra_detalle cd
+     INNER JOIN compras c ON c.id = cd.compra_id AND c.estado = 'confirmada'
+     WHERE cd.producto_id = ?
+     ORDER BY c.fecha DESC, cd.id DESC
+     LIMIT 1`,
+    [productoId]
+  );
+  const r = rows[0] as ProductoUltimaCompraPrecio | undefined;
+  return r ?? null;
+}
+
 /**
  * Recalcula precio de venta en Bs usando el precio USD de cada producto.
  * Si hay punto tope, conserva la misma diferencia absoluta respecto al precio lista

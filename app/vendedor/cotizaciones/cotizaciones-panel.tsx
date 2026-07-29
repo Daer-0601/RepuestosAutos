@@ -6,6 +6,7 @@ import {
   type VentaCarritoProducto,
 } from "@/app/vendedor/ventas/nueva/_components/venta-carrito-tabla";
 import { VentaCatalogoTabla } from "@/app/vendedor/ventas/nueva/_components/venta-catalogo-tabla";
+import { UsbBarcodeScanField } from "@/app/vendedor/_components/usb-barcode-scan-field";
 import { CATALOGO_FILAS_DEFAULT } from "@/lib/catalogo-productos-constants";
 import type { ModoCatalogoVenta, ProductoVentaCompletoRow, VentaCatalogoApiRow } from "@/lib/types/venta-vendedor-catalogo";
 import {
@@ -31,7 +32,6 @@ import {
   ChevronUp,
   Loader2,
   Plus,
-  ScanLine,
   Send,
   ShoppingBag,
 } from "lucide-react";
@@ -263,10 +263,9 @@ export function CotizacionesPanel() {
     agregarAlCarrito(mapCatalogRowToLookup(row, miSucursalId));
   }
 
-  async function buscarProducto(e: React.FormEvent) {
-    e.preventDefault();
+  async function buscarProductoPorCodigo(rawIn: string) {
     setMsg(null);
-    const raw = codigoBuscar.trim();
+    const raw = rawIn.trim();
     if (!raw) return;
     setBuscando(true);
     try {
@@ -502,34 +501,29 @@ export function CotizacionesPanel() {
       </section>
 
       <section className="rounded-2xl border border-amber-500/25 bg-gradient-to-b from-amber-500/[0.07] to-slate-950/40 p-4 sm:p-5">
-        <h2 className="text-base font-semibold text-white">Agregar con código o QR</h2>
+        <h2 className="text-base font-semibold text-white">Agregar con lector QR / código</h2>
         <p className="mt-1 max-w-2xl text-xs text-slate-500">
-          Escaneá o pegá el código y pulsá Enter. En cotización podés incluir cualquier producto activo, tengas o no stock.
+          Conectá el ZKB209 por USB. En cotización podés incluir cualquier producto activo, tengas o no stock.
         </p>
-        <form onSubmit={buscarProducto} className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-stretch">
-          <div className="relative min-w-0 flex-1">
-            <ScanLine
-              className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-amber-400/60"
-              aria-hidden
-            />
-            <input
-              className={`${inp} h-12 rounded-xl border-amber-500/25 bg-slate-950/90 pl-12 pr-4 text-sm shadow-inner shadow-black/30 placeholder:text-slate-600 focus:border-amber-500/50`}
-              value={codigoBuscar}
-              onChange={(e) => setCodigoBuscar(e.target.value)}
-              placeholder="Código interno, QR o referencia…"
-              autoComplete="off"
-            />
-          </div>
+        <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-end">
+          <UsbBarcodeScanField
+            className="min-w-0 flex-1"
+            value={codigoBuscar}
+            onChange={setCodigoBuscar}
+            onSubmitCodigo={buscarProductoPorCodigo}
+            disabled={buscando || submitting}
+            inputClassName={`${inp} h-12 rounded-xl border-amber-500/25 bg-slate-950/90 pl-12 pr-4 text-sm shadow-inner shadow-black/30 placeholder:text-slate-600 focus:border-amber-500/50`}
+          />
           <button
-            type="submit"
+            type="button"
             disabled={buscando || !codigoBuscar.trim()}
+            onClick={() => void buscarProductoPorCodigo(codigoBuscar)}
             className="inline-flex h-12 shrink-0 items-center justify-center gap-2 rounded-xl bg-amber-500 px-6 text-sm font-semibold text-slate-950 shadow-lg shadow-amber-900/20 transition hover:bg-amber-400 disabled:pointer-events-none disabled:opacity-40"
           >
             {buscando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" strokeWidth={2.5} />}
             Agregar
           </button>
-        </form>
-
+        </div>
       </section>
 
       <section className="space-y-3">

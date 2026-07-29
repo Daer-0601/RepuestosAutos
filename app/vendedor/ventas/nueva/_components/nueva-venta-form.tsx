@@ -5,24 +5,18 @@ import {
   type VentaCarritoLinea,
   type VentaCarritoProducto,
 } from "@/app/vendedor/ventas/nueva/_components/venta-carrito-tabla";
-import { VentaCatalogoTabla } from "@/app/vendedor/ventas/nueva/_components/venta-catalogo-tabla";
 import { VentaVendedorToolbar } from "@/app/vendedor/ventas/nueva/_components/venta-vendedor-toolbar";
 import {
   ClienteCreditoBuscador,
   type ClienteCreditoSeleccionado,
 } from "@/app/vendedor/ventas/nueva/_components/cliente-credito-buscador";
-import { CATALOGO_FILAS_DEFAULT } from "@/lib/catalogo-productos-constants";
-import {
-  applyCatalogoTextFilterChange,
-  type CatalogoTextFilterName,
-} from "@/lib/catalogo-filtros-texto";
-import type { ModoCatalogoVenta, ProductoVentaCompletoRow, VentaCatalogoApiRow } from "@/lib/types/venta-vendedor-catalogo";
+import { UsbBarcodeScanField } from "@/app/vendedor/_components/usb-barcode-scan-field";
+import type { ProductoVentaCompletoRow } from "@/lib/types/venta-vendedor-catalogo";
 import {
   carritoProductoSinMetadatos,
   clampPrecioUnitBsInput,
   defaultPrecioUnitBsStr,
   fusionarProductoCarrito,
-  mapCatalogRowToLookup,
   mapCompletoToLookup,
   parsePrecioUnitBsExplicito,
   parseQty,
@@ -33,16 +27,19 @@ import {
   snapPrecioUnitBsToRange,
   subtotalLineaBs,
 } from "@/lib/vendedor/venta-carrito-helpers";
+import {
+  clearVentaNuevaBorrador,
+  loadVentaNuevaBorrador,
+  saveVentaNuevaBorrador,
+} from "@/lib/vendedor/venta-nueva-borrador";
 import { validarPrecioVentaBs } from "@/lib/venta-precio-lista-tope-range";
 import {
   CheckCircle2,
-  ChevronDown,
-  ChevronUp,
   History,
   Loader2,
   OctagonX,
+  Package,
   Plus,
-  ScanLine,
   ShoppingBag,
   X,
 } from "lucide-react";
@@ -67,22 +64,6 @@ export function NuevaVentaForm() {
   const [sucursalNombre, setSucursalNombre] = useState("");
   const [tipoCambio, setTipoCambio] = useState<Tc | null>(null);
 
-  const [q, setQ] = useState("");
-  const [codigo, setCodigo] = useState("");
-  const [codigoPieza, setCodigoPieza] = useState("");
-  const [especificacion, setEspecificacion] = useState("");
-  const [medida, setMedida] = useState("");
-  const [descripcion, setDescripcion] = useState("");
-  const [repuesto, setRepuesto] = useState("");
-  const [modoCatalogo, setModoCatalogo] = useState<ModoCatalogoVenta>("mi_sucursal");
-  const [perPage, setPerPage] = useState(String(CATALOGO_FILAS_DEFAULT));
-
-  const [catalogLoading, setCatalogLoading] = useState(false);
-  const [catalogBuscado, setCatalogBuscado] = useState(false);
-  const [catalogTotal, setCatalogTotal] = useState(0);
-  const [catalogSucursales, setCatalogSucursales] = useState<{ id: number; nombre: string }[]>([]);
-  const [catalogRows, setCatalogRows] = useState<VentaCatalogoApiRow[]>([]);
-
   const [codigoBuscar, setCodigoBuscar] = useState("");
   const [buscando, setBuscando] = useState(false);
   const [ultimoScanReferencia, setUltimoScanReferencia] = useState<ProductoVentaCompletoRow | null>(null);
@@ -104,28 +85,8 @@ export function NuevaVentaForm() {
 
   const [username, setUsername] = useState("");
   const [reloj, setReloj] = useState(() => new Date());
-  const [catalogoExpandido, setCatalogoExpandido] = useState(false);
   const metadatosHidratadosRef = useRef(new Set<number>());
   const hidratandoMetadatosRef = useRef(false);
-
-  function onCatalogoTextFilterChange(name: CatalogoTextFilterName, value: string) {
-    const next = applyCatalogoTextFilterChange(name, value, {
-      q,
-      codigo,
-      codigo_pieza: codigoPieza,
-      especificacion,
-      medida,
-      descripcion,
-      repuesto,
-    });
-    setQ(next.q);
-    setCodigo(next.codigo);
-    setCodigoPieza(next.codigo_pieza);
-    setEspecificacion(next.especificacion);
-    setMedida(next.medida);
-    setDescripcion(next.descripcion);
-    setRepuesto(next.repuesto);
-  }
 
   const loadContext = useCallback(async () => {
     setLoadingCtx(true);
@@ -148,15 +109,43 @@ export function NuevaVentaForm() {
         setCtxError(data.error ?? "No se pudo cargar el contexto.");
         return;
       }
-      setMiSucursalId(Number(data.sucursalId ?? 0));
+      const sid = Number(data.sucursalId ?? 0);
+      const listaCajeros = Array.isArray(data.cajeros) ? data.cajeros : [];
+      const draft = loadVentaNuevaBorrador(sid);
+
+      setMiSucursalId(sid);
       setSucursalNombre(data.sucursalNombre ?? "");
       setUsername(data.username ?? "");
-      const listaCajeros = Array.isArray(data.cajeros) ? data.cajeros : [];
       setCajeros(listaCajeros);
-      setCajeroDestinoId((prev) => {
-        if (prev && listaCajeros.some((c) => String(c.id) === prev)) return prev;
-        return listaCajeros.length === 1 ? String(listaCajeros[0].id) : "";
-      });
+
+      if (draft) {
+        setLineas(draft.lineas);
+        setEsCredito(draft.esCredito);
+        setClienteCredito(draft.clienteCredito);
+        setClienteNombreLibre(draft.clienteNombreLibre);
+        setClienteNit(draft.clienteNit);
+        const cajeroOk =
+          draft.cajeroDestinoId &&
+          listaCajeros.some((c) => String(c.id) === draft.cajeroDestinoId);
+        setCajeroDestinoId(
+          cajeroOk
+            ? draft.cajeroDestinoId
+            : listaCajeros.length === 1
+              ? String(listaCajeros[0].id)
+              : ""
+        );
+        for (const ln of draft.lineas) {
+          if (!carritoProductoSinMetadatos(ln.producto)) {
+            metadatosHidratadosRef.current.add(ln.producto.id);
+          }
+        }
+      } else {
+        setCajeroDestinoId((prev) => {
+          if (prev && listaCajeros.some((c) => String(c.id) === prev)) return prev;
+          return listaCajeros.length === 1 ? String(listaCajeros[0].id) : "";
+        });
+      }
+
       setTipoCambio(data.tipoCambio ?? null);
     } catch {
       setCtxError("Error de red al cargar datos.");
@@ -169,27 +158,30 @@ export function NuevaVentaForm() {
     void loadContext();
   }, [loadContext]);
 
-  /** Si el catálogo ya trajo la fila, completar marca / procedencia / unidad sin otro request. */
+  /** Guarda el borrador al salir de la página o al cambiar líneas / cliente. */
   useEffect(() => {
-    if (!miSucursalId || catalogRows.length === 0) return;
-    setLineas((prev) => {
-      let changed = false;
-      const next = prev.map((ln) => {
-        if (!carritoProductoSinMetadatos(ln.producto)) return ln;
-        const row = catalogRows.find((r) => r.id === ln.producto.id);
-        if (!row) return ln;
-        changed = true;
-        metadatosHidratadosRef.current.add(ln.producto.id);
-        return {
-          ...ln,
-          producto: fusionarProductoCarrito(ln.producto, mapCatalogRowToLookup(row, miSucursalId)),
-        };
-      });
-      return changed ? next : prev;
+    if (loadingCtx || !miSucursalId) return;
+    saveVentaNuevaBorrador({
+      sucursalId: miSucursalId,
+      lineas,
+      cajeroDestinoId,
+      esCredito,
+      clienteCredito,
+      clienteNombreLibre,
+      clienteNit,
     });
-  }, [catalogRows, miSucursalId]);
+  }, [
+    loadingCtx,
+    miSucursalId,
+    lineas,
+    cajeroDestinoId,
+    esCredito,
+    clienteCredito,
+    clienteNombreLibre,
+    clienteNit,
+  ]);
 
-  /** Repone metadatos faltantes (p. ej. línea agregada antes del cambio de columnas). */
+  /** Repone metadatos faltantes (marca, procedencia, unidad) vía lookup. */
   useEffect(() => {
     if (!miSucursalId || lineas.length === 0 || hidratandoMetadatosRef.current) return;
     const pending = lineas.filter(
@@ -314,67 +306,9 @@ export function NuevaVentaForm() {
     });
   }
 
-  async function ejecutarBusquedaCatalogo() {
-    if (!miSucursalId) return;
+  async function buscarProductoPorCodigo(rawIn: string) {
     setMsg(null);
-    setCatalogLoading(true);
-    try {
-      const per = Math.trunc(Number(perPage));
-      const res = await fetch("/api/vendedor/productos/catalogo", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          q,
-          codigo,
-          codigo_pieza: codigoPieza,
-          especificacion,
-          medida,
-          descripcion,
-          repuesto,
-          modo: modoCatalogo,
-          perPage: Number.isFinite(per) && per >= 10 ? per : CATALOGO_FILAS_DEFAULT,
-        }),
-      });
-      const data = (await res.json()) as {
-        total?: number;
-        sucursales?: { id: number; nombre: string }[];
-        rows?: VentaCatalogoApiRow[];
-        error?: string;
-      };
-      if (!res.ok) {
-        setMsg({ type: "err", text: data.error ?? "No se pudo buscar en el catálogo." });
-        setCatalogRows([]);
-        setCatalogTotal(0);
-        return;
-      }
-      setCatalogTotal(Number(data.total ?? 0));
-      setCatalogSucursales(Array.isArray(data.sucursales) ? data.sucursales : []);
-      setCatalogRows(Array.isArray(data.rows) ? data.rows : []);
-    } catch {
-      setMsg({ type: "err", text: "Error de red en la búsqueda del catálogo." });
-      setCatalogRows([]);
-    } finally {
-      setCatalogBuscado(true);
-      setCatalogLoading(false);
-    }
-  }
-
-  function onAgregarDesdeTabla(row: VentaCatalogoApiRow) {
-    const p = mapCatalogRowToLookup(row, miSucursalId);
-    if (p.stock < 1) {
-      setMsg({
-        type: "err",
-        text: "Sin stock en tu sucursal. Revisá otras columnas o pedí un traspaso desde admin.",
-      });
-      return;
-    }
-    agregarAlCarrito(p);
-  }
-
-  async function buscarProducto(e: React.FormEvent) {
-    e.preventDefault();
-    setMsg(null);
-    const raw = codigoBuscar.trim();
+    const raw = rawIn.trim();
     if (!raw) return;
     setBuscando(true);
     setUltimoScanReferencia(null);
@@ -398,7 +332,7 @@ export function NuevaVentaForm() {
         setUltimoScanReferencia(p);
         setMsg({
           type: "err",
-          text: `${p.codigo}: sin stock en ${sucursalNombre}. Mirá el cuadro de referencia abajo o el catálogo por sucursal.`,
+          text: `${p.codigo}: sin stock en ${sucursalNombre}. Mirá el cuadro de referencia abajo o consultá Productos en el menú.`,
         });
         return;
       }
@@ -504,11 +438,13 @@ export function NuevaVentaForm() {
         totalBs: totales.bs.toFixed(2),
         at: Date.now(),
       });
+      clearVentaNuevaBorrador();
       setLineas([]);
       setClienteNombreLibre("");
       setClienteNit("");
+      setEsCredito(false);
+      setClienteCredito(null);
       setUltimoScanReferencia(null);
-      void ejecutarBusquedaCatalogo();
       router.refresh();
     } catch {
       setMsg({ type: "err", text: "Error de red al confirmar." });
@@ -726,48 +662,52 @@ export function NuevaVentaForm() {
         </div>
       </section>
 
-      {/* 1 · Entrada rápida (lector / teclado) */}
+      {/* 1 · Entrada rápida (lector USB / teclado) */}
       <section className="rounded-2xl border border-amber-500/25 bg-gradient-to-b from-amber-500/[0.07] to-slate-950/40 p-4 sm:p-5">
         <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <h2 className="text-base font-semibold text-white">Agregar con código o QR</h2>
+            <h2 className="text-base font-semibold text-white">Agregar con lector QR / código</h2>
             <p className="mt-1 max-w-2xl text-xs text-slate-500">
-              Enfocá el cursor acá, escaneá o pegá el código y pulsá Enter. Solo suma líneas si hay stock en tu
-              sucursal.
+              Conectá el ZKB209 por USB (modo teclado). Con el indicador en verde, escaneá el QR o código de
+              barras: se agrega solo al carrito si hay stock en tu sucursal.
             </p>
           </div>
-          <Link
-            href="/vendedor/ventas"
-            className="inline-flex shrink-0 items-center gap-2 self-start rounded-lg border border-white/10 px-3 py-2 text-xs font-medium text-slate-300 transition hover:border-amber-500/30 hover:text-white"
-          >
-            <History className="h-3.5 w-3.5 text-amber-400/80" />
-            Ver historial
-          </Link>
-        </div>
-        <form onSubmit={buscarProducto} className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-stretch">
-          <div className="relative min-w-0 flex-1">
-            <ScanLine
-              className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-amber-400/60"
-              aria-hidden
-            />
-            <input
-              className={`${inp} h-12 rounded-xl border-amber-500/25 bg-slate-950/90 pl-12 pr-4 text-sm shadow-inner shadow-black/30 placeholder:text-slate-600 focus:border-amber-500/50`}
-              value={codigoBuscar}
-              onChange={(e) => setCodigoBuscar(e.target.value)}
-              placeholder="Código interno, QR o referencia…"
-              autoComplete="off"
-              autoFocus
-            />
+          <div className="flex flex-wrap gap-2">
+            <Link
+              href="/vendedor/productos"
+              className="inline-flex shrink-0 items-center gap-2 self-start rounded-lg border border-white/10 px-3 py-2 text-xs font-medium text-slate-300 transition hover:border-amber-500/30 hover:text-white"
+            >
+              <Package className="h-3.5 w-3.5 text-amber-400/80" />
+              Buscar productos
+            </Link>
+            <Link
+              href="/vendedor/ventas"
+              className="inline-flex shrink-0 items-center gap-2 self-start rounded-lg border border-white/10 px-3 py-2 text-xs font-medium text-slate-300 transition hover:border-amber-500/30 hover:text-white"
+            >
+              <History className="h-3.5 w-3.5 text-amber-400/80" />
+              Ver historial
+            </Link>
           </div>
+        </div>
+        <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-end">
+          <UsbBarcodeScanField
+            className="min-w-0 flex-1"
+            value={codigoBuscar}
+            onChange={setCodigoBuscar}
+            onSubmitCodigo={buscarProductoPorCodigo}
+            disabled={buscando || submitting}
+            inputClassName={`${inp} h-12 rounded-xl border-amber-500/25 bg-slate-950/90 pl-12 pr-4 text-sm shadow-inner shadow-black/30 placeholder:text-slate-600 focus:border-amber-500/50`}
+          />
           <button
-            type="submit"
+            type="button"
             disabled={buscando || !codigoBuscar.trim()}
+            onClick={() => void buscarProductoPorCodigo(codigoBuscar)}
             className="inline-flex h-12 shrink-0 items-center justify-center gap-2 rounded-xl bg-amber-500 px-6 text-sm font-semibold text-slate-950 shadow-lg shadow-amber-900/20 transition hover:bg-amber-400 disabled:pointer-events-none disabled:opacity-40"
           >
             {buscando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" strokeWidth={2.5} />}
             Agregar
           </button>
-        </form>
+        </div>
 
         {ultimoScanReferencia ? (
           <div className="mt-4 rounded-xl border border-amber-500/30 bg-slate-950/60 p-4 text-sm">
@@ -798,172 +738,8 @@ export function NuevaVentaForm() {
         ) : null}
       </section>
 
-      {/* 2 · Buscador de catálogo */}
+      {/* 2 · Líneas de esta venta */}
       <section className="space-y-3 border-t border-white/10 pt-6">
-        <button
-          type="button"
-          onClick={() => setCatalogoExpandido((v) => !v)}
-          className="flex w-full items-center justify-between gap-3 rounded-xl border border-white/10 bg-slate-950/50 px-4 py-3 text-left transition hover:border-amber-500/30 hover:bg-slate-900/60"
-        >
-          <div>
-            <p className="text-sm font-semibold text-white">Buscador de repuestos</p>
-            <p className="mt-0.5 text-xs text-slate-500">
-              Stock por sucursal; podés agregar al carrito solo si tu depósito tiene existencia.
-            </p>
-          </div>
-          {catalogoExpandido ? (
-            <ChevronUp className="h-5 w-5 shrink-0 text-slate-500" />
-          ) : (
-            <ChevronDown className="h-5 w-5 shrink-0 text-slate-500" />
-          )}
-        </button>
-        {catalogoExpandido ? (
-          <div className="space-y-4">
-            <form
-              className="rounded-2xl border border-white/10 bg-slate-950/40 p-4 sm:p-5"
-              onSubmit={(e) => {
-                e.preventDefault();
-                if (catalogLoading) return;
-                void ejecutarBusquedaCatalogo();
-              }}
-            >
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                <div className="lg:col-span-2">
-                  <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Texto</label>
-                  <input
-                    name="q"
-                    value={q}
-                    onChange={(e) => onCatalogoTextFilterChange("q", e.target.value)}
-                    placeholder="Palabras en código, nombre, descripción…"
-                    className={`${inp} mt-1`}
-                  />
-                </div>
-                <div>
-                  <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-                    Código exacto
-                  </label>
-                  <input
-                    value={codigo}
-                    onChange={(e) => onCatalogoTextFilterChange("codigo", e.target.value)}
-                    placeholder="Ej. 1000"
-                    className={`${inp} mt-1 font-mono`}
-                  />
-                </div>
-                <div>
-                  <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Cód. pieza</label>
-                  <input
-                    value={codigoPieza}
-                    onChange={(e) => onCatalogoTextFilterChange("codigo_pieza", e.target.value)}
-                    placeholder="OEM / referencia"
-                    className={`${inp} mt-1`}
-                  />
-                </div>
-                <div>
-                  <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-                    Especificación
-                  </label>
-                  <input
-                    value={especificacion}
-                    onChange={(e) => onCatalogoTextFilterChange("especificacion", e.target.value)}
-                    className={`${inp} mt-1`}
-                  />
-                </div>
-                <div>
-                  <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Medida</label>
-                  <input
-                    value={medida}
-                    onChange={(e) => onCatalogoTextFilterChange("medida", e.target.value)}
-                    className={`${inp} mt-1`}
-                  />
-                </div>
-                <div>
-                  <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Descripción</label>
-                  <input
-                    value={descripcion}
-                    onChange={(e) => onCatalogoTextFilterChange("descripcion", e.target.value)}
-                    className={`${inp} mt-1`}
-                  />
-                </div>
-                <div>
-                  <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Repuesto</label>
-                  <input
-                    value={repuesto}
-                    onChange={(e) => onCatalogoTextFilterChange("repuesto", e.target.value)}
-                    className={`${inp} mt-1`}
-                  />
-                </div>
-                <div>
-                  <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Qué stock ver</label>
-                  <select
-                    value={modoCatalogo}
-                    onChange={(e) => setModoCatalogo(e.target.value as ModoCatalogoVenta)}
-                    className={`${inp} mt-1`}
-                  >
-                    <option value="mi_sucursal">Solo lo vendible en mi sucursal</option>
-                    <option value="referencia">Referencia: con stock en alguna sucursal</option>
-                    <option value="todos">Todos los activos</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Máx. filas</label>
-                  <input
-                    value={perPage}
-                    onChange={(e) => setPerPage(e.target.value)}
-                    inputMode="numeric"
-                    className={`${inp} mt-1 font-mono`}
-                  />
-                </div>
-              </div>
-              <div className="mt-4 flex flex-wrap gap-2 border-t border-white/5 pt-4">
-                <button
-                  type="submit"
-                  disabled={catalogLoading}
-                  className="rounded-xl bg-amber-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-amber-400 disabled:opacity-40"
-                >
-                  {catalogLoading ? "Buscando…" : "Buscar en catálogo"}
-                </button>
-                <button
-                  type="button"
-                  className="rounded-xl border border-white/15 px-4 py-2 text-sm text-slate-300 hover:bg-white/5"
-                  onClick={() => {
-                    setQ("");
-                    setCodigo("");
-                    setCodigoPieza("");
-                    setEspecificacion("");
-                    setMedida("");
-                    setDescripcion("");
-                    setRepuesto("");
-                    setModoCatalogo("mi_sucursal");
-                    setPerPage(String(CATALOGO_FILAS_DEFAULT));
-                  }}
-                >
-                  Limpiar filtros
-                </button>
-              </div>
-            </form>
-            <p className="text-xs text-slate-500">
-              {catalogLoading
-                ? "Consultando…"
-                : !catalogBuscado
-                  ? "Elegí filtros y pulsá «Buscar en catálogo»."
-                  : catalogTotal === 0
-                    ? "Sin resultados. Probá otro criterio o modo de stock."
-                    : `Mostrando ${catalogRows.length} de ${catalogTotal} producto(s). Tu sucursal va resaltada.`}
-            </p>
-            <VentaCatalogoTabla
-              miSucursalId={miSucursalId}
-              sucursales={catalogSucursales}
-              rows={catalogRows}
-              loading={catalogLoading}
-              sinConsulta={!catalogBuscado}
-              onAgregar={onAgregarDesdeTabla}
-            />
-          </div>
-        ) : null}
-      </section>
-
-      {/* 3 · Líneas de esta venta */}
-      <section className="space-y-3">
         <div className="flex flex-wrap items-end justify-between gap-2">
           <div className="flex items-center gap-2">
             <ShoppingBag className="h-5 w-5 text-amber-400/90" aria-hidden />
@@ -1060,9 +836,12 @@ export function NuevaVentaForm() {
               onClick={() => {
                 if (lineas.length === 0 && !clienteNombreLibre.trim() && !clienteNit.trim()) return;
                 if (!confirm("¿Descartar esta venta y limpiar los datos?")) return;
+                clearVentaNuevaBorrador();
                 setLineas([]);
                 setClienteNombreLibre("");
                 setClienteNit("");
+                setEsCredito(false);
+                setClienteCredito(null);
                 setCajeroDestinoId(cajeros.length === 1 ? String(cajeros[0].id) : "");
                 setMsg(null);
               }}

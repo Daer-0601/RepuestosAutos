@@ -5,6 +5,7 @@ import {
   BajaLineasTabla,
   type BajaLineaRow,
 } from "@/app/admin/bajas-inventario/_components/baja-lineas-tabla";
+import { UsbBarcodeScanField } from "@/app/vendedor/_components/usb-barcode-scan-field";
 import { CATALOGO_FILAS_DEFAULT } from "@/lib/catalogo-productos-constants";
 import {
   applyCatalogoTextFilterChange,
@@ -12,7 +13,7 @@ import {
 } from "@/lib/catalogo-filtros-texto";
 import type { ProductoCatalogoRowConStock } from "@/lib/data/productos-catalogo";
 import type { SucursalRow } from "@/lib/data/sucursales";
-import { ChevronDown, ChevronUp, Loader2, Plus, ScanLine } from "lucide-react";
+import { ChevronDown, ChevronUp, Loader2, Plus } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 const STOCK_REFERENCIA_LIMIT = 10;
@@ -280,8 +281,8 @@ export function BajaInventarioForm({ sucursales }: { sucursales: SucursalRow[] }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [soloConStockEnSucursal]);
 
-  async function buscarPorCodigo() {
-    const raw = codigoBuscar.trim();
+  async function buscarPorCodigo(rawIn?: string) {
+    const raw = (rawIn ?? codigoBuscar).trim();
     if (!raw) return;
     if (!Number.isFinite(sucursalNum) || sucursalNum < 1) {
       setErr("Elegí sucursal.");
@@ -424,36 +425,24 @@ export function BajaInventarioForm({ sucursales }: { sucursales: SucursalRow[] }
       </div>
 
       <section className="rounded-2xl border border-white/10 bg-slate-900/40 p-4">
-        <h3 className="text-sm font-semibold text-white">Agregar con código o QR</h3>
+        <h3 className="text-sm font-semibold text-white">Agregar con lector QR / código</h3>
         <p className="mt-1 text-xs text-slate-500">
-          Misma búsqueda exacta que en traspasos. Enter o el botón agrega (solo con stock en la sucursal).
+          Conectá el ZKB209 por USB (modo teclado). Solo agrega si hay stock en la sucursal elegida.
         </p>
-        <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-stretch">
-          <div className="relative min-w-0 flex-1">
-            <ScanLine
-              className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-rose-400/70"
-              aria-hidden
-            />
-            <input
-              className={`${ctrlInp} pl-9`}
-              value={codigoBuscar}
-              onChange={(e) => setCodigoBuscar(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  void buscarPorCodigo();
-                }
-              }}
-              placeholder="Código interno o QR…"
-              disabled={pending || !sucursalId}
-            />
-          </div>
+        <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-end">
+          <UsbBarcodeScanField
+            className="min-w-0 flex-1"
+            value={codigoBuscar}
+            onChange={setCodigoBuscar}
+            onSubmitCodigo={buscarPorCodigo}
+            disabled={pending || buscandoCodigo || !sucursalId}
+            inputClassName={`${ctrlInp} h-11 rounded-xl border-rose-500/25 bg-slate-950/90 pl-12 pr-4 text-sm shadow-inner shadow-black/30 placeholder:text-slate-600 focus:border-rose-500/50`}
+          />
           <button
             type="button"
             disabled={pending || buscandoCodigo || !codigoBuscar.trim() || !sucursalId}
-            onClick={() => void buscarPorCodigo()}
-            className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg bg-rose-600 px-4 py-2 text-sm font-semibold text-white hover:bg-rose-500 disabled:opacity-50"
+            onClick={() => void buscarPorCodigo(codigoBuscar)}
+            className="inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-xl bg-rose-600 px-4 py-2 text-sm font-semibold text-white hover:bg-rose-500 disabled:opacity-50"
           >
             {buscandoCodigo ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
             Agregar

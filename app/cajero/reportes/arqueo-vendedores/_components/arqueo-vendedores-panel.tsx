@@ -382,7 +382,10 @@ export function ArqueoVendedoresPanel({
           <span className="font-mono text-slate-300">{fechaDesde}</span>
           {" — "}
           <span className="font-mono text-slate-300">{fechaHasta}</span>
-          <span className="hidden sm:inline"> · Cambiá las fechas arriba y pulsá «Filtrar».</span>
+          <span className="hidden sm:inline">
+            {" "}
+            · Cambiá las fechas arriba y pulsá «Filtrar». Las salidas no incluyen créditos pendientes de cobro.
+          </span>
         </p>
       </div>
 
